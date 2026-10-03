@@ -42,7 +42,10 @@ export async function POST(req: Request) {
   if (prompt.length < 3) return json(400, { code: "MISSING_FIELD", field: "prompt" });
 
   const key = getGeminiKey();
-  if (!key) return json(503, { code: "NO_KEY" });
+  const cfId = (process.env.CLOUDFLARE_ACCOUNT_ID ?? "").trim();
+  const cfToken = (process.env.CLOUDFLARE_API_TOKEN ?? "").trim();
+  const hasCf = !!(cfId && cfToken);
+  if (!key && !hasCf) return json(503, { code: "NO_KEY" });
 
   // reference image (editing): only real image types, size-capped
   let ref: { mime: string; data: string } | null = null;
@@ -82,6 +85,44 @@ export async function POST(req: Request) {
   parts.push({ text: finalPrompt });
 
   let lastNote = "";
+
+  // FREE path: Cloudflare Workers AI (FLUX.1 schnell, ~10k neurons/day at no cost).
+  // The text model is only used to turn the user's Arabic/Darija/French idea into
+  // an English prompt, which FLUX understands far better.
+  if (hasCf && !ref) {
+    try {
+      const english = key ? await toEnglishPrompt(key, `${prompt}${add ? `. Style: ${add}` : ""}`) : null;
+      const res = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfId)}/ai/run/@cf/black-forest-labs/flux-1-schnell`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfToken}` },
+          body: JSON.stringify({
+            prompt: (english ?? `${prompt}${add ? `. Style: ${add}` : ""}`).slice(0, 2000),
+            steps: 6,
+          }),
+          cache: "no-store",
+          signal: AbortSignal.timeout(90_000),
+        }
+      );
+      const j = (await res.json().catch(() => null)) as {
+        result?: { image?: string };
+        errors?: { message?: string }[];
+      } | null;
+      if (res.ok && j?.result?.image) {
+        return ok({ mime: "image/jpeg", data: j.result.image }, "flux-1-schnell", credit.remaining);
+      }
+      lastNote = `cloudflare: ${res.status} ${safeDetail(j?.errors?.[0]?.message ?? "no image")}`;
+    } catch (e) {
+      lastNote = `cloudflare: ${safeDetail(e)}`;
+    }
+  }
+
+  if (!key) {
+    await refund();
+    return json(502, { code: "FAILED", detail: lastNote.slice(0, 240) });
+  }
+
   for (const model of imageModels()) {
     try {
       const res = await fetch(
@@ -160,4 +201,37 @@ function ok(image: { mime: string; data: string }, model: string, remaining: num
     { image: image.data, mime: image.mime, model },
     { "x-credits-remaining": String(remaining) }
   );
+}
+
+/** Cheap text call (works on the Gemini free tier) → English image prompt, or null. */
+async function toEnglishPrompt(key: string, idea: string): Promise<string | null> {
+  try {
+    const res = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [
+              {
+                text:
+                  "You write prompts for the FLUX image model. Convert the user's idea (Arabic, Algerian Darija, French or English) into ONE vivid English prompt of at most 60 words: subject, setting, lighting, camera/medium, mood. Output only the prompt, no quotes.",
+              },
+            ],
+          },
+          contents: [{ role: "user", parts: [{ text: idea }] }],
+          generationConfig: { maxOutputTokens: 200, temperature: 0.6 },
+        }),
+        cache: "no-store",
+        signal: AbortSignal.timeout(12_000),
+      }
+    );
+    if (!res.ok) return null;
+    const j = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    const t = (j.candidates?.[0]?.content?.parts ?? []).map((x) => x.text ?? "").join("").trim();
+    return t.length > 8 ? t : null;
+  } catch {
+    return null;
+  }
 }
