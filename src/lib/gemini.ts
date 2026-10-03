@@ -1225,3 +1225,63 @@ export function ensembleStream(
     },
   });
 }
+
+/**
+ * Continues a cut-off big build in a NEW request (so it gets a fresh time
+ * budget). Streams only the missing tail — no drafts, no repetition.
+ */
+export function continueStream(o: { system: string; user: string; partial: string }): ReadableStream<string> {
+  let reader: ReadableStreamDefaultReader<string> | null = null;
+  let cancelled = false;
+  const fence = /^\s*```(?:html)?[ \t]*\r?\n/i;
+  return new ReadableStream<string>({
+    async start(controller) {
+      try {
+        const lead = await streamLead(
+          {
+            system: o.system + EPIC_RULES,
+            temperature: 0.7,
+            epic: true,
+            maxTokens: 64_000,
+            messages: [
+              { role: "user", text: o.user },
+              { role: "model", text: o.partial },
+              {
+                role: "user",
+                text: "Your previous answer was cut off. Continue EXACTLY from the last character you wrote: no repetition, no preface, no new code fence. Keep every system and feature complete, close every open tag / function, end with </html> if it is a web page, then close the code fence.",
+              },
+            ],
+          },
+          []
+        );
+        reader = lead.stream.getReader();
+        let head = "";
+        let headDone = false;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || cancelled) break;
+          if (!headDone) {
+            head += value;
+            if (head.length < 16) continue;
+            headDone = true;
+            controller.enqueue(head.replace(fence, ""));
+            continue;
+          }
+          controller.enqueue(value);
+        }
+        if (!headDone && head) controller.enqueue(head.replace(fence, ""));
+      } catch (e) {
+        console.error("[continue] failed:", e);
+      }
+      try {
+        controller.close();
+      } catch {
+        /* closed */
+      }
+    },
+    cancel() {
+      cancelled = true;
+      reader?.cancel().catch(() => undefined);
+    },
+  });
+}

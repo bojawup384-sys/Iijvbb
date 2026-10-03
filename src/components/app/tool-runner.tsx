@@ -25,6 +25,13 @@ import { usePro } from "@/lib/pro-i18n";
 import { extractHtml } from "@/lib/attachments";
 import { cn } from "@/lib/utils";
 
+/** True when a code answer stops before its closing fence / </html>. */
+function cutOff(text: string): boolean {
+  if ((text.match(/```/g) ?? []).length % 2 === 1) return true;
+  const m = text.match(/```html[\s\S]*?(```|$)/i);
+  return !!m && !/<\/html>/i.test(m[0]);
+}
+
 type ErrKind = "quota" | "nokey" | "busy" | "generic" | "pro" | null;
 
 export function ToolRunner({ tool }: { tool: ToolDef }) {
@@ -50,6 +57,7 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
   const [error, setError] = useState<ErrKind>(null);
   const [errDetail, setErrDetail] = useState("");
   const [copied, setCopied] = useState(false);
+  const [part, setPart] = useState(0);
 
   const accent = ACCENTS[tool.accent];
   const Icon = tool.icon;
@@ -109,27 +117,56 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
       }
       applyHeaders(res);
       setModelUsed(res.headers.get("x-model") ?? "");
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("no stream");
-      const decoder = new TextDecoder();
-      let acc = "";
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      // repaint ~16×/s instead of once per chunk (keeps long results smooth)
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
-        if (!timer) {
-          timer = setTimeout(() => {
-            timer = null;
-            setResult(acc);
-          }, 60);
+      const pump = async (r: Response, base: string) => {
+        const reader = r.body?.getReader();
+        if (!reader) return base;
+        const decoder = new TextDecoder();
+        let acc = base;
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          // repaint ~16×/s instead of once per chunk (keeps long results smooth)
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            acc += decoder.decode(value, { stream: true });
+            if (!timer) {
+              timer = setTimeout(() => {
+                timer = null;
+                setResult(acc);
+              }, 60);
+            }
+          }
+        } catch {
+          /* connection cut by the server time limit: keep what we have, then continue */
         }
+        if (timer) clearTimeout(timer);
+        acc += decoder.decode();
+        setResult(acc);
+        return acc;
+      };
+      let acc = await pump(res, "");
+      if (!acc.trim()) {
+        setError("generic");
+      } else if (tool.kind === "game") {
+        // never stop halfway: keep asking for the missing tail until the file is complete
+        for (let i = 0; i < 8 && cutOff(acc); i++) {
+          setPart(i + 2);
+          let r: Response;
+          try {
+            r = await authFetch("/api/ai/tool", {
+              method: "POST",
+              body: JSON.stringify({ tool: tool.id, inputs: values, outLang, locale, continueFrom: acc }),
+            });
+          } catch {
+            break;
+          }
+          if (!r.ok) break;
+          const next = await pump(r, acc);
+          if (next.length - acc.length < 40) break;
+          acc = next;
+        }
+        setPart(0);
       }
-      if (timer) clearTimeout(timer);
-      acc += decoder.decode();
-      setResult(acc);
-      if (!acc.trim()) setError("generic");
     } catch {
       setError("generic");
     } finally {
@@ -381,7 +418,7 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
                   <div>
                     <p className="text-sm font-black text-white">{pro.gameBuilding}</p>
                     <p dir="ltr" className="text-xs tabular-nums text-slate-400">
-                      {result.split("\n").length.toLocaleString()} سطر · {result.length.toLocaleString()} chars
+                      {result.split("\n").length.toLocaleString()} سطر · {result.length.toLocaleString()} chars{part > 1 ? ` · الجزء ${part}` : ""}
                     </p>
                   </div>
                 </div>

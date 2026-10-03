@@ -95,7 +95,7 @@ export async function POST(req: Request) {
     attachments?: unknown;
     textFiles?: unknown;
     deep?: boolean;
-   v6?: boolean;
+    v6?: boolean;
   };
   try {
     body = await req.json();

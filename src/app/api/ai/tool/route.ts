@@ -1,8 +1,8 @@
 import { json, safeDetail } from "@/lib/http";
 import { rateLimit } from "@/lib/rate-limit";
 import { verifyRequest } from "@/lib/server-auth";
-import { takeCredit, refundCredit, FREE_DAILY } from "@/lib/usage";
-import { streamGemini, ensembleStream, streamToResponse, GeminiError } from "@/lib/gemini";
+import { takeCredit, refundCredit, getProfile, FREE_DAILY } from "@/lib/usage";
+import { streamGemini, ensembleStream, continueStream, streamToResponse, GeminiError } from "@/lib/gemini";
 import { buildToolPrompt } from "@/lib/prompts";
 import { getTool } from "@/lib/tools";
 import { db } from "@/db";
@@ -25,6 +25,7 @@ export async function POST(req: Request) {
     inputs?: Record<string, string>;
     outLang?: string;
     locale?: string;
+    continueFrom?: string;
   };
   try {
     body = await req.json();
@@ -44,6 +45,18 @@ export async function POST(req: Request) {
     if (f.required && !inputs[f.key]) {
       return json(400, { code: "MISSING_FIELD", field: f.key });
     }
+  }
+
+  // Big builds: the client asks for the missing tail in a fresh request (no extra credit)
+  if (typeof body.continueFrom === "string" && body.continueFrom.length > 200 && tool.pro && tool.kind === "game") {
+    const prof = await getProfile(user.uid).catch(() => null);
+    if (prof?.plan !== "pro") return json(403, { code: "PRO_ONLY" });
+    const loc2 = ["ar", "fr", "en"].includes(body.locale ?? "") ? (body.locale as string) : "ar";
+    const p2 = buildToolPrompt(tool.id, inputs, loc2, body.outLang ?? "auto");
+    return streamToResponse(
+      continueStream({ system: p2.system, user: p2.user, partial: body.continueFrom.slice(-160_000) }),
+      { "x-plan": "pro" }
+    );
   }
 
   const rl = rateLimit(`ai:${user.uid}`, 30, 60_000);
