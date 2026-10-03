@@ -1,0 +1,1220 @@
+/**
+ * Gemini streaming client — plain REST, no SDK required.
+ * Configure in Vercel: GEMINI_API_KEY (or GOOGLE_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY)
+ */
+
+export type ChatTurn = { role: "user" | "model"; text: string };
+
+/** Binary input (image / PDF) sent inline to Gemini — Pro only. */
+export type Attachment = { mime: string; data: string };
+
+/** Which engine room a request runs in. */
+export type Tier = "free" | "pro";
+/** "speed" = newest fast model; "quality" = strongest model available (Pro only). */
+export type Mode = "speed" | "quality";
+
+/** Static fallbacks, used only when model discovery is not possible. */
+const FALLBACK_FREE = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
+];
+const FALLBACK_FAST = [
+  "gemini-2.5-flash",
+  "gemini-flash-latest",
+  "gemini-2.5-flash-lite",
+  "gemini-flash-lite-latest",
+];
+const FALLBACK_MAX = [
+  "gemini-pro-latest",
+  "gemini-2.5-pro",
+  "gemini-flash-latest",
+  "gemini-2.5-flash",
+];
+/** Kept for the diagnostics route. */
+export const FALLBACK_MODELS = FALLBACK_FAST;
+export const MODELS = FALLBACK_FAST;
+
+export class GeminiError extends Error {
+  code: "NO_KEY" | "BUSY" | "ERROR";
+  detail: string;
+  constructor(code: "NO_KEY" | "BUSY" | "ERROR", message: string) {
+    super(message);
+    this.code = code;
+    this.detail = message.slice(0, 300);
+  }
+}
+
+const KEY_NAMES = [
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GOOGLE_AI_API_KEY",
+  "GEMINI_KEY",
+  "GEMINI_APIKEY",
+  "GEMINI",
+  "API_KEY",
+  "APIKEY",
+  "KEY",
+];
+
+function clean(v: string | undefined): string {
+  // strip spaces, newlines and accidental quotes pasted with the key
+  return (v ?? "").trim().replace(/^["'`]+|["'`]+$/g, "").trim();
+}
+
+/** Returns which env var holds the key (name only) and the cleaned value. */
+export function findGeminiKey(): { name: string; value: string } | undefined {
+  const env = process.env;
+  const upper = new Map<string, string>();
+  for (const k of Object.keys(env)) upper.set(k.toUpperCase(), k);
+
+  // 1) well-known names, case-insensitive
+  for (const n of KEY_NAMES) {
+    const real = upper.get(n);
+    const v = real ? clean(env[real]) : "";
+    if (v) return { name: real as string, value: v };
+  }
+  // 2) last resort: any non-public variable that looks like a Google AI key
+  for (const k of Object.keys(env)) {
+    if (k.startsWith("NEXT_PUBLIC_")) continue; // Firebase web key lives there
+    const v = clean(env[k]);
+    if (/^AIza[0-9A-Za-z_-]{30,}$/.test(v)) return { name: k, value: v };
+  }
+  return undefined;
+}
+
+export function getGeminiKey(): string | undefined {
+  return findGeminiKey()?.value;
+}
+
+async function openStream(
+  model: string,
+  key: string,
+  body: unknown,
+  signal?: AbortSignal
+): Promise<Response> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify(body),
+    cache: "no-store",
+    signal,
+  });
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+type ModelSets = { free: string[]; fast: string[]; max: string[] };
+const FALLBACK_SETS: ModelSets = {
+  free: FALLBACK_FREE,
+  fast: FALLBACK_FAST,
+  max: FALLBACK_MAX,
+};
+
+/**
+ * Asks Google which models this key can really use, so a retired model name
+ * can never break the app. Cached for 30 min per server instance.
+ */
+const gm = globalThis as typeof globalThis & {
+  __barqModels?: { at: number; sets: ModelSets };
+  __barqModelsP?: Promise<ModelSets>;
+};
+
+/** Cached sets, or at most ~1.5s of waiting before falling back to the static ones. */
+async function getModelSets(key: string): Promise<ModelSets> {
+  const c = gm.__barqModels;
+  if (c && Date.now() - c.at < 30 * 60_000) return c.sets;
+  if (!gm.__barqModelsP) {
+    gm.__barqModelsP = discoverModels(key).finally(() => {
+      gm.__barqModelsP = undefined;
+    });
+  }
+  return Promise.race([
+    gm.__barqModelsP,
+    sleep(1500).then(() => FALLBACK_SETS),
+  ]);
+}
+
+const NEVER = /(image|tts|live|audio|embedding|robotics|computer|native|vision|learnlm|gemma|aqa)/;
+const UNSTABLE = /(exp|preview|thinking)/;
+
+function versionOf(n: string): number {
+  const v = n.match(/gemini-(\d+(?:\.\d+)?)/);
+  return v ? parseFloat(v[1]) : 0;
+}
+
+async function discoverModels(key: string): Promise<ModelSets> {
+  try {
+    const res = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200",
+      {
+        headers: { "x-goog-api-key": key },
+        cache: "no-store",
+        signal: AbortSignal.timeout(6000),
+      }
+    );
+    if (!res.ok) return rememberFallback();
+    const data = (await res.json()) as {
+      models?: { name?: string; supportedGenerationMethods?: string[] }[];
+    };
+    const names = Array.from(
+      new Set(
+        (data.models ?? [])
+          .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
+          .map((m) => (m.name ?? "").replace(/^models\//, ""))
+          .filter((n) => /^gemini-/.test(n) && !NEVER.test(n))
+      )
+    );
+    const flash = names.filter((n) => /flash/.test(n));
+    const pro = names.filter((n) => /-pro/.test(n));
+    if (flash.length === 0) return rememberFallback();
+
+    const byScore = (score: (n: string) => number) => (x: string, y: string) =>
+      score(y) - score(x);
+
+    // FREE: stable flash only, steady and predictable ("lite" last).
+    const stableScore = (n: string) =>
+      versionOf(n) * 100 - (/lite/.test(n) ? 150 : 0) - (/-latest$/.test(n) ? 40 : 0);
+    const free = flash
+      .filter((n) => !UNSTABLE.test(n))
+      .sort(byScore(stableScore))
+      .slice(0, 5);
+
+    // PRO / speed: the newest flash of all — aliases and previews included.
+    const fastScore = (n: string) =>
+      (n === "gemini-flash-latest" ? 1000 : 0) +
+      versionOf(n) * 100 -
+      (/lite/.test(n) ? 150 : 0) -
+      (/(exp|thinking)/.test(n) ? 500 : 0) -
+      (/preview/.test(n) ? 20 : 0);
+    const fast = flash.sort(byScore(fastScore)).slice(0, 4);
+
+    // PRO / quality: the strongest pro model first, then the fast set as a net.
+    const maxScore = (n: string) =>
+      (n === "gemini-pro-latest" ? 1000 : 0) +
+      versionOf(n) * 100 -
+      (/(exp|thinking)/.test(n) ? 500 : 0) -
+      (/preview/.test(n) ? 20 : 0);
+    const max = pro.sort(byScore(maxScore)).slice(0, 2);
+
+    const uniq = (l: string[]) => Array.from(new Set(l));
+    const sets: ModelSets = {
+      free: free.length ? free : FALLBACK_FREE,
+      // newest first, but ALWAYS two stable models inside the first three
+      // candidates, so a busy preview model can never take the whole race down
+      fast: uniq([
+        ...fast.slice(0, 1),
+        ...(free.length ? free : FALLBACK_FREE).slice(0, 2),
+        ...fast.slice(1),
+        ...(free.length ? free : FALLBACK_FREE),
+        ...FALLBACK_FREE,
+      ]).slice(0, 8),
+      max: uniq([...max, ...fast.slice(0, 1), ...free, ...fast]).slice(0, 8),
+    };
+    gm.__barqModels = { at: Date.now(), sets };
+    return sets;
+  } catch {
+    return rememberFallback();
+  }
+}
+
+function rememberFallback(): ModelSets {
+  // pretend it was fetched 28 min ago: re-checked after ~2 minutes
+  gm.__barqModels = { at: Date.now() - 28 * 60_000, sets: FALLBACK_SETS };
+  return FALLBACK_SETS;
+}
+
+/** 2.5+/3 models "think" by default and can burn the whole token budget silently. */
+function configFor(
+  model: string,
+  base: Record<string, unknown>,
+  deep: boolean
+): Record<string, unknown> {
+  if (/gemini-3/.test(model)) {
+    return { ...base, thinkingConfig: { thinkingLevel: deep ? "high" : "low" } };
+  }
+  if (/gemini-2\.5/.test(model)) {
+    return {
+      ...base,
+      thinkingConfig: { thinkingBudget: deep ? 2048 : 0 },
+    };
+  }
+  return base;
+}
+
+type Attempt =
+  | { ok: true; res: Response; model: string }
+  | { ok: false; status: number; text: string; model: string };
+
+const isBadKey = (a: { status: number; text: string }) =>
+  a.status === 401 ||
+  a.status === 403 ||
+  /API_KEY_INVALID|API key not valid|API key expired|PERMISSION_DENIED/i.test(a.text);
+
+/** One model, one try. Handles models that reject thinkingConfig. */
+async function attempt(
+  model: string,
+  key: string,
+  mk: (m: string) => { generationConfig: Record<string, unknown> } & Record<string, unknown>,
+  baseGen: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<Attempt> {
+  try {
+    let res = await openStream(model, key, mk(model), signal);
+    if (res.status === 400) {
+      const t400 = await res.text().catch(() => "");
+      if (/thinking/i.test(t400)) {
+        const b = mk(model);
+        b.generationConfig = baseGen;
+        res = await openStream(model, key, b, signal);
+      } else {
+        return { ok: false, status: 400, text: t400.slice(0, 300), model };
+      }
+    }
+    if (res.ok && res.body) return { ok: true, res, model };
+    const text = await res.text().catch(() => "");
+    return { ok: false, status: res.status, text: text.slice(0, 300), model };
+  } catch (e) {
+    return { ok: false, status: 0, text: String(e).slice(0, 200), model };
+  }
+}
+
+/**
+ * PRO "ultra speed": candidates start staggered (0 / 1.8s / 3.6s) or immediately
+ * when an earlier one fails — the first healthy stream wins, the rest are cancelled.
+ */
+function hedged(
+  models: string[],
+  key: string,
+  mk: Parameters<typeof attempt>[2],
+  baseGen: Record<string, unknown>
+): Promise<{ winner?: Extract<Attempt, { ok: true }>; fails: Attempt[] }> {
+  const list = models.slice(0, 3);
+  const n = list.length;
+  const ctrls = list.map(() => new AbortController());
+  const fails: Attempt[] = [];
+  const started = new Set<number>();
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  let settled = false;
+  let failed = 0;
+
+  return new Promise((resolve) => {
+    const finish = (winner?: Extract<Attempt, { ok: true }>, keep = -1) => {
+      settled = true;
+      timers.forEach(clearTimeout);
+      ctrls.forEach((c, j) => {
+        if (j !== keep) c.abort();
+      });
+      resolve({ winner, fails });
+    };
+    const startNext = () => {
+      for (let i = 0; i < n; i++) {
+        if (!started.has(i)) return start(i);
+      }
+    };
+    const start = (i: number) => {
+      if (settled || started.has(i) || i >= n) return;
+      started.add(i);
+      void attempt(list[i], key, mk, baseGen, ctrls[i].signal).then((a) => {
+        if (settled) {
+          if (a.ok) a.res.body?.cancel().catch(() => undefined);
+          return;
+        }
+        if (a.ok) return finish(a, i);
+        fails.push(a);
+        failed += 1;
+        if (isBadKey(a) || failed >= n) return finish();
+        startNext();
+      });
+    };
+    start(0);
+    for (let i = 1; i < n; i++) timers.push(setTimeout(() => start(i), i * 1800));
+  });
+}
+
+/* ---------------- free fallbacks: OpenRouter, then Groq (OpenAI-compatible) ---------------- */
+
+type Kind = "gemini" | "openai" | "anthropic";
+type Compat = {
+  name: string;
+  kind: Kind;
+  url: string;
+  key: string;
+  models: string[];
+  headers?: Record<string, string>;
+};
+
+const withCustom = (custom: string, list: string[]) =>
+  Array.from(new Set([...(custom ? [custom] : []), ...list]));
+
+/** Every non-Gemini engine whose key exists joins the team automatically. */
+function fallbackProviders(): Compat[] {
+  const out: Compat[] = [];
+  const env = process.env;
+
+  const aKey = clean(env.ANTHROPIC_API_KEY) || clean(env.CLAUDE_API_KEY);
+  if (aKey) {
+    out.push({
+      name: "claude",
+      kind: "anthropic",
+      url: "https://api.anthropic.com/v1/messages",
+      key: aKey,
+      models: withCustom(clean(env.ANTHROPIC_MODEL) || clean(env.CLAUDE_MODEL), [
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
+        "claude-haiku-4-5-20251001",
+      ]),
+    });
+  }
+  const dKey = clean(env.DEEPSEEK_API_KEY);
+  if (dKey) {
+    out.push({
+      name: "deepseek",
+      kind: "openai",
+      url: "https://api.deepseek.com/chat/completions",
+      key: dKey,
+      models: withCustom(clean(env.DEEPSEEK_MODEL), ["deepseek-chat", "deepseek-reasoner"]),
+    });
+  }
+  const xKey = clean(env.XAI_API_KEY) || clean(env.GROK_API_KEY);
+  if (xKey) {
+    out.push({
+      name: "grok",
+      kind: "openai",
+      url: "https://api.x.ai/v1/chat/completions",
+      key: xKey,
+      models: withCustom(clean(env.XAI_MODEL) || clean(env.GROK_MODEL), [
+        "grok-4",
+        "grok-4-fast",
+        "grok-3",
+        "grok-code-fast-1",
+      ]),
+    });
+  }
+  const orKey = clean(env.OPENROUTER_API_KEY);
+  if (orKey) {
+    out.push({
+      name: "openrouter",
+      kind: "openai",
+      url: "https://openrouter.ai/api/v1/chat/completions",
+      key: orKey,
+      models: withCustom(clean(env.OPENROUTER_MODEL), [
+        "openrouter/free",
+        "deepseek/deepseek-chat-v3.1:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "qwen/qwen3-235b-a22b:free",
+      ]),
+      headers: { "X-Title": "Barq AI" },
+    });
+  }
+  const gKey = clean(env.GROQ_API_KEY);
+  if (gKey) {
+    out.push({
+      name: "groq",
+      kind: "openai",
+      url: "https://api.groq.com/openai/v1/chat/completions",
+      key: gKey,
+      models: withCustom(clean(env.GROQ_MODEL), ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]),
+    });
+  }
+  return out;
+}
+
+/** Anthropic needs strictly alternating roles starting with "user". */
+function toAnthropicMessages(messages: ChatTurn[], atts: Attachment[] = []) {
+  const merged: { role: "user" | "assistant"; text: string }[] = [];
+  for (const m of messages) {
+    const role = m.role === "model" ? "assistant" : "user";
+    const last = merged[merged.length - 1];
+    if (last && last.role === role) last.text += "\n\n" + m.text;
+    else merged.push({ role, text: m.text });
+  }
+  while (merged.length && merged[0].role !== "user") merged.shift();
+  return merged.map((m, i) => {
+    const isLast = i === merged.length - 1 && m.role === "user";
+    if (!isLast || atts.length === 0) return { role: m.role, content: m.text };
+    return {
+      role: m.role,
+      content: [
+        ...atts.map((a) =>
+          a.mime === "application/pdf"
+            ? { type: "document", source: { type: "base64", media_type: a.mime, data: a.data } }
+            : { type: "image", source: { type: "base64", media_type: a.mime, data: a.data } }
+        ),
+        { type: "text", text: m.text },
+      ],
+    };
+  });
+}
+
+/** One request body + headers for any non-Gemini engine. */
+function compatRequest(
+  p: Compat,
+  model: string,
+  system: string,
+  messages: ChatTurn[],
+  o: { temperature: number; maxTokens: number; stream: boolean; atts?: Attachment[] }
+): { headers: Record<string, string>; body: string } {
+  if (p.kind === "anthropic") {
+    return {
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": p.key,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        system,
+        stream: o.stream,
+        temperature: Math.min(o.temperature, 1),
+        max_tokens: Math.min(o.maxTokens, 32000),
+        messages: toAnthropicMessages(messages, o.atts),
+      }),
+    };
+  }
+  const cap = p.name === "groq" ? 8000 : 16000;
+  return {
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${p.key}`,
+      ...(p.headers ?? {}),
+    },
+    body: JSON.stringify({
+      model,
+      stream: o.stream,
+      temperature: o.temperature,
+      max_tokens: Math.min(o.maxTokens, cap),
+      messages: [
+        { role: "system", content: system },
+        ...messages.map((m) => ({
+          role: m.role === "model" ? "assistant" : "user",
+          content: m.text,
+        })),
+      ],
+    }),
+  };
+}
+
+async function openCompat(
+  system: string,
+  messages: ChatTurn[],
+  temperature: number,
+  maxTokens: number,
+  opts: { providers?: Compat[]; atts?: Attachment[] } = {}
+): Promise<{ res: Response; model: string; kind: Kind } | null> {
+  for (const p of opts.providers ?? fallbackProviders()) {
+    for (const model of p.models) {
+      try {
+        const rq = compatRequest(p, model, system, messages, {
+          temperature,
+          maxTokens,
+          stream: true,
+          atts: opts.atts,
+        });
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 20000); // connection phase only
+        let res: Response;
+        try {
+          res = await fetch(p.url, {
+            method: "POST",
+            headers: rq.headers,
+            body: rq.body,
+            cache: "no-store",
+            signal: ctl.signal,
+          });
+        } finally {
+          clearTimeout(t);
+        }
+        if (res.ok && res.body) return { res, model: `${p.name}:${model}`, kind: p.kind };
+        console.error(`[fallback] ${p.name}/${model}: ${res.status}`);
+        await res.text().catch(() => undefined);
+        if (res.status === 401 || res.status === 403) break; // bad key: skip this provider
+      } catch (e) {
+        console.error(`[fallback] ${p.name}/${model} failed:`, String(e).slice(0, 120));
+      }
+    }
+  }
+  return null;
+}
+
+/** Text delta of one SSE payload, for every supported wire format. */
+function deltaOf(kind: Kind, json: unknown): string[] {
+  const j = json as {
+    type?: string;
+    delta?: { type?: string; text?: string };
+    choices?: { delta?: { content?: string } }[];
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  };
+  if (kind === "anthropic") {
+    return j?.type === "content_block_delta" && j.delta?.type === "text_delta" && j.delta.text
+      ? [j.delta.text]
+      : [];
+  }
+  if (kind === "openai") {
+    const t = j?.choices?.[0]?.delta?.content;
+    return typeof t === "string" && t ? [t] : [];
+  }
+  return (j?.candidates?.[0]?.content?.parts ?? [])
+    .map((x) => x.text)
+    .filter((t): t is string => typeof t === "string" && t.length > 0);
+}
+
+/** Turns an upstream SSE response into a ReadableStream of plain text chunks. */
+function pumpStream(
+  upstream: Response,
+  kind: Kind,
+  onDone?: (full: string) => void | Promise<void>
+): ReadableStream<string> {
+  const decoder = new TextDecoder();
+  const full: string[] = [];
+  let cancelled = false;
+  let rd: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
+  return new ReadableStream<string>({
+    async start(controller) {
+      const reader = (upstream.body as ReadableStream<Uint8Array>).getReader();
+      rd = reader;
+      let buffer = "";
+      try {
+        for (;;) {
+          if (cancelled) break;
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx: number;
+          // eslint-disable-next-line no-cond-assign
+          while ((idx = buffer.indexOf("\n")) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              for (const t of deltaOf(kind, JSON.parse(payload))) {
+                full.push(t);
+                if (!cancelled) controller.enqueue(t);
+              }
+            } catch {
+              // incomplete JSON line — ignore
+            }
+          }
+        }
+      } catch {
+        // network hiccup: keep partial text
+      } finally {
+        if (full.length === 0 && !cancelled) {
+          // blocked / empty answer: never leave the user with a blank bubble
+          controller.enqueue("تعذّر توليد رد على هذه الرسالة، جرّب صياغة مختلفة.");
+        }
+        try {
+          await onDone?.(full.join(""));
+        } catch {
+          // persistence errors must never break the stream
+        }
+        try {
+          controller.close();
+        } catch {
+          // already closed by a client disconnect
+        }
+      }
+    },
+    cancel() {
+      cancelled = true;
+      rd?.cancel().catch(() => undefined);
+    },
+  });
+}
+
+/**
+ * Opens a Gemini SSE stream and returns a ReadableStream of text chunks.
+ * `onDone` fires once with the full accumulated text (even on mid-stream
+ * failure it receives the partial text).
+ *
+ * tier "pro": newest models + hedged requests (ultra speed), attachments allowed,
+ *             bigger output budget, optional "quality" mode (strongest model).
+ */
+export async function streamGemini(opts: {
+  system: string;
+  messages: ChatTurn[];
+  temperature?: number;
+  tier?: Tier;
+  mode?: Mode;
+  maxTokens?: number;
+  /** images / PDFs attached to the LAST user turn (ignored for free tier) */
+  attachments?: Attachment[];
+  /** keep the strong model but skip long "thinking" (lower first-token latency) */
+  lowThink?: boolean;
+  /** never fall back to the other engines (used when the caller manages failover) */
+  noFallback?: boolean;
+  onModel?: (model: string) => void;
+  onDone?: (full: string) => void | Promise<void>;
+}): Promise<ReadableStream<string>> {
+  const key = getGeminiKey() ?? "";
+  if (!key && (opts.noFallback || fallbackProviders().length === 0)) {
+    throw new GeminiError("NO_KEY", "Gemini API key is not configured");
+  }
+
+  const pro = opts.tier === "pro";
+  const quality = pro && opts.mode === "quality";
+  const baseGen = {
+    temperature: opts.temperature ?? 0.75,
+    maxOutputTokens: opts.maxTokens ?? (pro ? 8192 : 4096),
+    topP: 0.95,
+  };
+  const atts = pro ? (opts.attachments ?? []) : [];
+  const lastIdx = opts.messages.length - 1;
+  const mk = (model: string) => ({
+    systemInstruction: { parts: [{ text: opts.system }] },
+    contents: opts.messages.map((m, i) => ({
+      role: m.role,
+      parts:
+        i === lastIdx && m.role === "user" && atts.length > 0
+          ? [
+              ...atts.map((a) => ({
+                inlineData: { mimeType: a.mime, data: a.data },
+              })),
+              { text: m.text },
+            ]
+          : [{ text: m.text }],
+    })),
+    generationConfig: configFor(model, baseGen, quality && !opts.lowThink),
+  });
+
+  const sets = key ? await getModelSets(key) : FALLBACK_SETS;
+  const models = key ? (quality ? sets.max : pro ? sets.fast : sets.free) : [];
+
+  let upstream: Response | null = null;
+  let usedModel = "";
+  let lastErr = "";
+  // set inside closures below, so keep them typed as plain booleans
+  let sawQuota = false as boolean;
+  let sawBadKey = false as boolean;
+  let sawOverload = false as boolean;
+
+  const note = (a: Attempt) => {
+    if (a.ok) return;
+    lastErr = `${a.model}: ${a.status} ${a.text}`;
+    if (a.status === 429) sawQuota = true; // quotas are per-model: try the next one
+    if (a.status === 0 || a.status === 500 || a.status === 503 || a.status === 504) {
+      sawOverload = true;
+    }
+    if (isBadKey(a)) sawBadKey = true;
+  };
+
+  for (let round = 0; round < 3 && !upstream; round++) {
+    if (pro && !quality) {
+      // quality mode waits for the strong model; only speed mode races candidates
+      const r = await hedged(models, key, mk, baseGen);
+      r.fails.forEach(note);
+      if (r.winner) {
+        upstream = r.winner.res;
+        usedModel = r.winner.model;
+        break;
+      }
+      // the raced candidates all failed: walk the remaining models one by one
+      if (!sawBadKey) {
+        for (const model of models.slice(3)) {
+          const a = await attempt(model, key, mk, baseGen);
+          if (a.ok) {
+            upstream = a.res;
+            usedModel = a.model;
+            break;
+          }
+          note(a);
+          if (sawBadKey) break;
+        }
+        if (upstream) break;
+      }
+    } else {
+      for (const model of models) {
+        const a = await attempt(model, key, mk, baseGen);
+        if (a.ok) {
+          upstream = a.res;
+          usedModel = a.model;
+          break;
+        }
+        note(a);
+        if (sawBadKey) break; // another model will not fix a bad key
+      }
+    }
+    if (upstream || sawBadKey) break;
+    // everything was overloaded / limited: wait a moment and go around once more
+    if ((sawOverload || sawQuota) && round < 2) await sleep(round === 0 ? 700 : 1500);
+    else break;
+  }
+
+  let kind: Kind = "gemini";
+  if (!upstream && !opts.noFallback) {
+    const fb = await openCompat(
+      opts.system,
+      opts.messages,
+      opts.temperature ?? 0.75,
+      opts.maxTokens ?? (pro ? 8192 : 4096),
+      { atts }
+    );
+    if (fb) {
+      upstream = fb.res;
+      usedModel = fb.model;
+      kind = fb.kind;
+    }
+  }
+
+  if (!upstream && sawBadKey) {
+    console.error("[gemini] invalid key:", lastErr);
+    throw new GeminiError("NO_KEY", lastErr);
+  }
+  if (!upstream && (sawQuota || sawOverload)) {
+    console.error("[gemini] busy:", lastErr);
+    throw new GeminiError("BUSY", lastErr);
+  }
+  if (!upstream) console.error("[gemini] failed:", lastErr);
+
+  if (!upstream || !upstream.body) {
+    throw new GeminiError("ERROR", lastErr || "All models failed");
+  }
+  opts.onModel?.(usedModel);
+  return pumpStream(upstream, kind, opts.onDone);
+}
+
+/** Stream → web Response with text/plain body */
+export function streamToResponse(
+  stream: ReadableStream<string>,
+  headers: Record<string, string> = {}
+): Response {
+  const encoded = stream.pipeThrough(new TextEncoderStream());
+  return new Response(encoded, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      ...headers,
+    },
+  });
+}
+
+
+/* =====================================================================
+ * AI TEAM ("dream team"): Claude + Gemini + DeepSeek + Grok + OpenRouter + Groq.
+ * Every engine whose key exists joins automatically.
+ *   Stage 1 — all engines write a full draft IN PARALLEL (quorum: the slowest
+ *             engine can never hold the others hostage).
+ *   Stage 2 — the lead engine merges them into ONE bigger, better result.
+ *             If the lead is down, the next engine takes over (full failover).
+ *   Stage 3 — if the answer was cut off (token limit), it is continued and closed.
+ * ===================================================================== */
+
+type StreamOpts = Parameters<typeof streamGemini>[0];
+
+/** Detects "build me a game / site / app / big script" style requests. */
+export function isBuildRequest(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 12) return false;
+  const noun =
+    /(لعب[ةه]|العاب|ألعاب|\bgame|موقع|مواقع|\bsite\b|website|web ?app|landing|صفح[ةه] (هبوط|ويب)|تطبيق|\bapp\b|dashboard|لوح[ةه] (تحكم|قيادة)|متجر|\bstore\b|portfolio|بوت|\bbot\b|extension|إضاف[ةه]|html|نظام|system)/i;
+  const verb =
+    /(اصنع|اصنعلي|صنع|اعمل|سو[يّ]|صمم|برمج|ابن[يِ]|انشئ|أنشئ|طور|create|build|make|develop|design|generate|بغيت|ابغى|أبغى|أريد|اريد|نحب|حاب|حبيت)/i;
+  const codeWrite = /(اكتب|write|اعطني|أعطني|عطيني).{0,40}(كود|code|script|سكريبت|سكربت|برنامج|program)/i;
+  return (noun.test(t) && verb.test(t)) || codeWrite.test(t);
+}
+
+const DRAFT_RULES = `
+
+You are ONE of several senior engineers working in parallel on the same request. Deliver your most ambitious, complete and polished version: many features, rich content, multiple screens / levels / sections, smooth animations, a cohesive premium design, fully responsive (phone first), zero bugs. One complete self-contained deliverable. No placeholders, no TODO, no "rest of the code here" — write EVERYTHING out in full.`;
+
+/** Web deliverables (game / site / app): the output is rendered straight into a preview iframe. */
+const SYNTH_RULES_WEB = `
+
+You are the LEAD engineer. Below the request you will find drafts written by other engineers. Produce ONE final deliverable that is bigger, richer and more polished than every draft:
+- merge the strongest mechanics, features, content and visuals from all drafts and add what is still missing;
+- fix every bug and inconsistency; if a draft is broken or cut off, rewrite that part properly;
+- ONE engine/framework only (never mix rendering stacks), ONE complete self-contained HTML file with inline <style> and <script>;
+- no placeholders of any kind (no TODO, no "...", no "rest unchanged") — every function, state and asset synthesizer fully written;
+- never mention the drafts, the other engineers or this process.
+OUTPUT FORMAT: return ONLY the raw HTML inside a single \`\`\`html fenced block. No text before it, no text after it.`;
+
+const SYNTH_RULES = `
+
+You are the LEAD engineer. Below the request you will find drafts written by other engineers. Produce ONE final deliverable that is bigger, richer and more polished than every draft:
+- merge the strongest mechanics, features, content and visuals from all drafts and add what is still missing;
+- fix every bug and inconsistency; if a draft is broken or cut off, rewrite that part properly;
+- keep a single complete self-contained file inside ONE fenced code block (same format rules as above);
+- write the FULL code — never abbreviate, never say "rest unchanged";
+- never mention the drafts, the other engineers or this process.
+After the code add a SHORT friendly summary (what is inside + how to use it).`;
+
+const ENGINE_LABEL: Record<string, string> = {
+  gemini: "Gemini",
+  claude: "Claude",
+  deepseek: "DeepSeek",
+  grok: "Grok",
+  openrouter: "OpenRouter",
+  groq: "Groq",
+};
+
+type Draft = { who: string; text: string };
+
+/** Connected engines, for diagnostics (names only — never keys). */
+export function listEngines(): { name: string; models: string[] }[] {
+  const out: { name: string; models: string[] }[] = [];
+  if (getGeminiKey()) out.push({ name: "gemini", models: FALLBACK_FAST });
+  for (const p of fallbackProviders()) out.push({ name: p.name, models: p.models });
+  return out;
+}
+
+/** Lead (merger) order: strongest coder first. Override with BARQ_LEAD=gemini|claude|... */
+function leadOrder(): string[] {
+  const base = ["claude", "gemini", "grok", "deepseek", "openrouter", "groq"];
+  const pref = clean(process.env.BARQ_LEAD).toLowerCase();
+  return pref && base.includes(pref) ? [pref, ...base.filter((x) => x !== pref)] : base;
+}
+
+const signalFor = (ms: number, stop: AbortSignal) =>
+  AbortSignal.any([AbortSignal.timeout(ms), stop]);
+
+async function draftGemini(
+  key: string,
+  system: string,
+  messages: ChatTurn[],
+  atts: Attachment[],
+  ms: number,
+  stop: AbortSignal
+): Promise<Draft | null> {
+  const sets = await getModelSets(key);
+  const last = messages.length - 1;
+  const base = { temperature: 0.7, maxOutputTokens: 16000, topP: 0.95 };
+  const deadline = Date.now() + ms;
+  // newest fast model first, then the stable ones
+  const models = Array.from(new Set([sets.fast[0], ...sets.free.slice(0, 2)])).filter(Boolean);
+  for (const model of models) {
+    const left = deadline - Date.now();
+    if (left < 4000 || stop.aborted) break;
+    try {
+      const body: Record<string, unknown> = {
+        systemInstruction: { parts: [{ text: system }] },
+        contents: messages.map((m, i) => ({
+          role: m.role,
+          parts:
+            i === last && m.role === "user" && atts.length > 0
+              ? [
+                  ...atts.map((a) => ({ inlineData: { mimeType: a.mime, data: a.data } })),
+                  { text: m.text },
+                ]
+              : [{ text: m.text }],
+        })),
+        generationConfig: configFor(model, base, false),
+      };
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const go = () =>
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify(body),
+          cache: "no-store",
+          signal: signalFor(Math.max(left, 4000), stop),
+        });
+      let res = await go();
+      if (res.status === 400) {
+        const t = await res.text().catch(() => "");
+        if (/thinking/i.test(t)) {
+          body.generationConfig = base;
+          res = await go();
+        }
+      }
+      if (!res.ok) {
+        await res.text().catch(() => undefined);
+        continue;
+      }
+      const j = (await res.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
+      };
+      const text = (j.candidates?.[0]?.content?.parts ?? []).map((x) => x.text ?? "").join("");
+      if (text.trim().length > 200) return { who: `gemini:${model}`, text };
+    } catch {
+      /* try the next model */
+    }
+  }
+  return null;
+}
+
+async function draftCompat(
+  p: Compat,
+  system: string,
+  messages: ChatTurn[],
+  atts: Attachment[],
+  ms: number,
+  stop: AbortSignal
+): Promise<Draft | null> {
+  const deadline = Date.now() + ms;
+  for (const model of p.models.slice(0, 3)) {
+    const left = deadline - Date.now();
+    if (left < 4000 || stop.aborted) break;
+    try {
+      const rq = compatRequest(p, model, system, messages, {
+        temperature: 0.7,
+        maxTokens: 14000,
+        stream: false,
+        atts,
+      });
+      const res = await fetch(p.url, {
+        method: "POST",
+        headers: rq.headers,
+        body: rq.body,
+        cache: "no-store",
+        signal: signalFor(left, stop),
+      });
+      if (!res.ok) {
+        await res.text().catch(() => undefined);
+        if (res.status === 401 || res.status === 403) break;
+        continue;
+      }
+      const j = (await res.json()) as {
+        content?: { type?: string; text?: string }[];
+        choices?: { message?: { content?: string } }[];
+      };
+      const text =
+        p.kind === "anthropic"
+          ? (j.content ?? []).map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("")
+          : j.choices?.[0]?.message?.content;
+      if (typeof text === "string" && text.trim().length > 200) {
+        return { who: `${p.name}:${model}`, text };
+      }
+    } catch {
+      /* try the next model */
+    }
+  }
+  return null;
+}
+
+/**
+ * Waits for the drafts with a QUORUM rule: once two engines delivered, the rest
+ * get 15 more seconds at most. A hard deadline protects the whole request.
+ */
+function collectDrafts(
+  jobs: Promise<Draft | null>[],
+  ms: number,
+  stop: AbortController
+): Promise<Draft[]> {
+  return new Promise((resolve) => {
+    const out: Draft[] = [];
+    let pending = jobs.length;
+    let settled = false;
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    let hard: ReturnType<typeof setTimeout> | undefined;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (hard) clearTimeout(hard);
+      if (grace) clearTimeout(grace);
+      stop.abort(); // cancel the engines that are still working
+      resolve(out.slice());
+    };
+    hard = setTimeout(finish, ms + 2000);
+    if (pending === 0) return finish();
+    for (const j of jobs) {
+      void j
+        .catch(() => null)
+        .then((d) => {
+          if (settled) return;
+          if (d) out.push(d);
+          pending -= 1;
+          if (pending === 0) return finish();
+          if (out.length >= 2 && !grace) grace = setTimeout(finish, 15_000);
+        });
+    }
+  });
+}
+
+/** Opens the final-answer stream on the first engine that works (full failover). */
+async function streamLead(
+  opts: StreamOpts,
+  atts: Attachment[]
+): Promise<{ stream: ReadableStream<string>; model: string }> {
+  const key = getGeminiKey() ?? "";
+  const providers = fallbackProviders();
+  const maxTokens = Math.max(opts.maxTokens ?? 0, 32_000);
+  let lastErr: unknown = null;
+  for (const name of leadOrder()) {
+    try {
+      if (name === "gemini") {
+        if (!key) continue;
+        let model = "";
+        const stream = await streamGemini({
+          ...opts,
+          mode: "quality",
+          tier: "pro",
+          lowThink: true,
+          noFallback: true,
+          maxTokens,
+          onModel: (m) => {
+            model = m;
+          },
+          onDone: undefined,
+          attachments: atts,
+        });
+        return { stream, model: model || "gemini" };
+      }
+      const p = providers.find((x) => x.name === name);
+      if (!p) continue;
+      const fb = await openCompat(opts.system, opts.messages, opts.temperature ?? 0.7, maxTokens, {
+        providers: [p],
+        atts,
+      });
+      if (fb) return { stream: pumpStream(fb.res, fb.kind), model: fb.model };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new GeminiError("ERROR", "No engine available");
+}
+
+/** True when a code answer stops before its last fence / </html>. */
+export function looksCut(text: string): boolean {
+  const fences = (text.match(/```/g) ?? []).length;
+  if (fences % 2 === 1) return true;
+  const html = text.match(/```html[\s\S]*?(```|$)/i);
+  if (html && !/<\/html>/i.test(html[0])) return true;
+  return false;
+}
+
+/**
+ * Returns IMMEDIATELY with a stream (so the connection stays alive while the
+ * engines work). If anything fails, `onFail` runs (refund the credit) and the
+ * user gets a friendly message instead of a dead request.
+ */
+export function ensembleStream(
+  opts: StreamOpts & { onFail?: (e: unknown) => void | Promise<void> }
+): ReadableStream<string> {
+  opts.onModel?.("ensemble");
+  let cancelled = false;
+  let reader: ReadableStreamDefaultReader<string> | null = null;
+
+  return new ReadableStream<string>({
+    async start(controller) {
+      const put = (t: string) => {
+        if (!cancelled) controller.enqueue(t);
+      };
+      try {
+        const key = getGeminiKey() ?? "";
+        const providers = fallbackProviders();
+        const names = [...(key ? ["gemini"] : []), ...providers.map((p) => p.name)].map(
+          (n) => ENGINE_LABEL[n] ?? n
+        );
+        put(
+          `> ⚡ فريق برق يشتغل: **${names.join(" + ")}** — كل محرّك يبني نسخته ثم يندمجون في نتيجة واحدة أقوى…\n\n`
+        );
+
+        const MS = Number(process.env.BARQ_DRAFT_MS) > 5000 ? Number(process.env.BARQ_DRAFT_MS) : 55_000;
+        const atts = opts.attachments ?? [];
+        const draftSys = opts.system + DRAFT_RULES;
+        const stop = new AbortController();
+        const jobs: Promise<Draft | null>[] = [
+          ...(key ? [draftGemini(key, draftSys, opts.messages, atts, MS, stop.signal)] : []),
+          ...providers.map((p) => draftCompat(p, draftSys, opts.messages, atts, MS, stop.signal)),
+        ];
+        const drafts = await collectDrafts(jobs, MS, stop);
+        if (cancelled) return controller.close();
+
+        let messages = opts.messages;
+        let system = opts.system;
+        if (drafts.length > 0) {
+          const who = drafts.map((d) => ENGINE_LABEL[d.who.split(":")[0]] ?? d.who);
+          put(`> ✅ شاركوا: **${who.join(" · ")}** — جاري الدمج النهائي…\n\n`);
+          const pack = drafts
+            .map((d, i) => `### DRAFT ${i + 1}\n\n${d.text.slice(0, 26_000)}`)
+            .join("\n\n---\n\n");
+          const lastTurn = opts.messages[opts.messages.length - 1];
+          messages = [
+            ...opts.messages.slice(0, -1),
+            {
+              role: "user",
+              text: `${lastTurn.text}\n\n=====\nDrafts from the other engineers (merge and surpass them):\n\n${pack}`,
+            },
+          ];
+          const web = drafts.some((d) => /```html/i.test(d.text));
+          system = opts.system + (web ? SYNTH_RULES_WEB : SYNTH_RULES);
+        }
+
+        const lead = await streamLead({ ...opts, system, messages }, atts);
+        let acc = "";
+        reader = lead.stream.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || cancelled) break;
+          acc += value;
+          put(value);
+        }
+
+        // Stage 3 — cut off by the token limit? continue once and close the file.
+        if (!cancelled && acc.length > 500 && looksCut(acc)) {
+          const origLast = opts.messages[opts.messages.length - 1];
+          const cont = await streamLead(
+            {
+              ...opts,
+              system,
+              messages: [
+                { role: "user", text: origLast.text },
+                { role: "model", text: acc },
+                {
+                  role: "user",
+                  text: "Your previous answer was cut off. Continue EXACTLY from the last character you wrote — no repetition, no preface, no new code fence. Finish the code, close every open tag / function, end with </html> if it is a web page, then close the code fence.",
+                },
+              ],
+            },
+            []
+          );
+          reader = cont.stream.getReader();
+          let head = "";
+          let headDone = false;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done || cancelled) break;
+            if (!headDone) {
+              head += value;
+              if (head.length < 16) continue;
+              headDone = true;
+              const clean2 = head.replace(/^\s*```(?:html)?[ \t]*\r?\n/i, "");
+              acc += clean2;
+              put(clean2);
+              continue;
+            }
+            acc += value;
+            put(value);
+          }
+          if (!headDone && head) {
+            acc += head;
+            put(head);
+          }
+        }
+
+        try {
+          await opts.onDone?.(acc);
+        } catch {
+          /* persistence errors must never break the stream */
+        }
+        if (!cancelled) controller.close();
+      } catch (e) {
+        console.error("[ensemble] failed:", e);
+        try {
+          await opts.onFail?.(e);
+        } catch {
+          /* ignore */
+        }
+        if (!cancelled) {
+          try {
+            controller.enqueue("\n\n⚠️ تعذّر إكمال الدمج الآن (ضغط على المحرّكات). أعد المحاولة بعد لحظات.");
+            controller.close();
+          } catch {
+            /* closed */
+          }
+        }
+      }
+    },
+    cancel() {
+      cancelled = true;
+      reader?.cancel().catch(() => undefined);
+    },
+  });
+}
