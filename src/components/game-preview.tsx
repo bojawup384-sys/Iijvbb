@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bookmark,
   Check,
@@ -10,10 +10,14 @@ import {
   ExternalLink,
   Maximize2,
   Monitor,
+  Package,
   RotateCcw,
   Smartphone,
   Tablet,
+  X,
 } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
+import { createZip, downloadBlob, splitHtml } from "@/lib/zip";
 import { usePro } from "@/lib/pro-i18n";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +26,7 @@ import { cn } from "@/lib/utils";
  * (cannot read the app's cookies / tokens) and a CSP that blocks all network.
  */
 const CSP =
-  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src \'none\'">';
+  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src \'unsafe-inline\'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src \'none\'">';
 
 function withCsp(html: string): string {
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${CSP}`);
@@ -47,6 +51,7 @@ export function GamePreview({
   const [device, setDevice] = useState<"phone" | "tablet" | "desktop">("desktop");
   const [flash, setFlash] = useState("");
   const widths = { phone: 390, tablet: 768, desktop: 0 } as const;
+  const { authFetch } = useAuth();
 
   const say = (m: string) => {
     setFlash(m);
@@ -65,18 +70,21 @@ export function GamePreview({
     window.open(url, "_blank", "noopener");
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
-  const save = () => {
+  const save = async () => {
     try {
-      const raw = localStorage.getItem("barq_gallery");
-      const list: { id: number; title: string; html: string; at: number }[] = raw ? JSON.parse(raw) : [];
       const title = (html.match(/<title>([^<]{1,60})<\/title>/i)?.[1] ?? "عمل بدون عنوان").trim();
-      list.unshift({ id: Date.now(), title, html, at: Date.now() });
-      localStorage.setItem("barq_gallery", JSON.stringify(list.slice(0, 12)));
-      say("حُفظ في الاستوديو");
+      const res = await authFetch("/api/projects", {
+        method: "POST",
+        body: JSON.stringify({ title, html }),
+      });
+      if (res.ok) say("حُفظ في الاستوديو");
+      else if (res.status === 409) say("الاستوديو ممتلئ (40 عمل)");
+      else say("تعذّر الحفظ");
     } catch {
-      say("المساحة ممتلئة");
+      say("تعذّر الحفظ");
     }
   };
+  const zip = () => downloadBlob(createZip(splitHtml(html)), "barq-project.zip");
 
   const download = () => {
     const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
@@ -113,7 +121,7 @@ export function GamePreview({
               onClick={() => setView(v)}
               className={cn(
                 "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-black transition",
-                view === v ? "bg-brand-600 text-white" : "text-slate-400 hover:text-white"
+                view === v ? "bg-white text-ink-950" : "text-slate-400 hover:text-white"
               )}
             >
               {v === "code" && <Code2 className="h-3.5 w-3.5" />}
@@ -157,13 +165,17 @@ export function GamePreview({
             <Copy className="h-3.5 w-3.5" />
             نسخ
           </button>
-          <button type="button" className={btn} onClick={save}>
+          <button type="button" className={btn} onClick={() => void save()}>
             <Bookmark className="h-3.5 w-3.5" />
             حفظ
           </button>
           <button type="button" className={btn} onClick={download}>
             <Download className="h-3.5 w-3.5" />
             {p.gameDownload}
+          </button>
+          <button type="button" className={btn} onClick={zip}>
+            <Package className="h-3.5 w-3.5" />
+            ZIP
           </button>
         </div>
       </div>
@@ -178,15 +190,173 @@ export function GamePreview({
           <code>{html}</code>
         </pre>
       ) : (
-        <div className="flex flex-1 justify-center bg-[radial-gradient(circle_at_50%_0%,#16241d,#050806)] p-0 sm:p-3">
+        <div className="flex flex-1 justify-center bg-[radial-gradient(circle_at_50%_0%,#18181b,#050505)] p-0 sm:p-3">
           <iframe
             key={run}
             title={p.gameTitle}
             srcDoc={doc}
-            sandbox="allow-scripts allow-pointer-lock"
+            sandbox="allow-scripts allow-pointer-lock allow-modals allow-forms"
             allow="fullscreen"
             className={cn("block bg-black transition-all duration-300", device !== "desktop" && "rounded-[1.6rem] ring-4 ring-white/10")}
             style={{ height, minHeight: 280, width: widths[device] ? `min(100%, ${widths[device]}px)` : "100%" }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/* Full-screen live preview (opens by itself when a build finishes)    */
+/* ------------------------------------------------------------------ */
+
+export function FullPreview({ html, onClose }: { html: string; onClose: () => void }) {
+  const { authFetch } = useAuth();
+  const doc = useMemo(() => withCsp(html), [html]);
+  const [run, setRun] = useState(0);
+  const [view, setView] = useState<"preview" | "code">("preview");
+  const [device, setDevice] = useState<"phone" | "tablet" | "desktop">("desktop");
+  const [flash, setFlash] = useState("");
+  const boxRef = useRef<HTMLDivElement>(null);
+  const title = useMemo(() => (html.match(/<title>([^<]{1,60})<\/title>/i)?.[1] ?? "معاينة برق").trim(), [html]);
+  const widths = { phone: 390, tablet: 768, desktop: 0 } as const;
+
+  // lock the page behind the overlay + Escape closes it
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const say = (m: string) => {
+    setFlash(m);
+    setTimeout(() => setFlash(""), 1800);
+  };
+  const ib =
+    "grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-slate-200 transition active:scale-90 hover:border-brand-400/50 hover:text-white";
+
+  return (
+    <div
+      ref={boxRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-[200] flex flex-col bg-ink-950"
+      style={{ height: "100dvh" }}
+    >
+      <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-ink-900/95 px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur">
+        <button type="button" onClick={onClose} aria-label="إغلاق" className={ib}>
+          <X className="h-5 w-5" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-black text-white">{title}</p>
+          <p className="truncate text-[10.5px] font-bold text-brand-300">معاينة حيّة · شاشة كاملة</p>
+        </div>
+        <div className="flex items-center gap-1.5 overflow-x-auto">
+          <button type="button" aria-label="إعادة تشغيل" onClick={() => setRun((n) => n + 1)} className={ib}>
+            <RotateCcw className="h-[18px] w-[18px]" />
+          </button>
+          <button
+            type="button"
+            aria-label={view === "preview" ? "عرض الكود" : "عرض المعاينة"}
+            onClick={() => setView((v) => (v === "preview" ? "code" : "preview"))}
+            className={cn(ib, view === "code" && "border-brand-400/60 bg-brand-500/20")}
+          >
+            <Code2 className="h-[18px] w-[18px]" />
+          </button>
+          <button
+            type="button"
+            aria-label="تبديل الجهاز"
+            onClick={() => setDevice((d) => (d === "desktop" ? "phone" : d === "phone" ? "tablet" : "desktop"))}
+            className={ib}
+          >
+            {device === "phone" ? <Smartphone className="h-[18px] w-[18px]" /> : device === "tablet" ? <Tablet className="h-[18px] w-[18px]" /> : <Monitor className="h-[18px] w-[18px]" />}
+          </button>
+          <button type="button" aria-label="تحميل ZIP" onClick={() => downloadBlob(createZip(splitHtml(html)), "barq-project.zip")} className={cn(ib, "border-amber-300/40 text-amber-200")}>
+            <Package className="h-[18px] w-[18px]" />
+          </button>
+          <button
+            type="button"
+            aria-label="حفظ في الاستوديو"
+            onClick={async () => {
+              try {
+                const res = await authFetch("/api/projects", { method: "POST", body: JSON.stringify({ title, html }) });
+                say(res.ok ? "حُفظ في الاستوديو" : res.status === 409 ? "الاستوديو ممتلئ" : "تعذّر الحفظ");
+              } catch {
+                say("تعذّر الحفظ");
+              }
+            }}
+            className={ib}
+          >
+            <Bookmark className="h-[18px] w-[18px]" />
+          </button>
+          <button
+            type="button"
+            aria-label="نسخ الكود"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(html);
+                say("تم النسخ");
+              } catch {
+                say("تعذّر النسخ");
+              }
+            }}
+            className={cn(ib, "hidden sm:grid")}
+          >
+            <Copy className="h-[18px] w-[18px]" />
+          </button>
+          <button
+            type="button"
+            aria-label="فتح في تبويب"
+            onClick={() => {
+              const url = URL.createObjectURL(new Blob([doc], { type: "text/html;charset=utf-8" }));
+              window.open(url, "_blank", "noopener");
+              setTimeout(() => URL.revokeObjectURL(url), 60_000);
+            }}
+            className={cn(ib, "hidden sm:grid")}
+          >
+            <ExternalLink className="h-[18px] w-[18px]" />
+          </button>
+          <button
+            type="button"
+            aria-label="ملء الشاشة"
+            onClick={() => void boxRef.current?.requestFullscreen?.().catch(() => undefined)}
+            className={cn(ib, "hidden sm:grid")}
+          >
+            <Maximize2 className="h-[18px] w-[18px]" />
+          </button>
+        </div>
+      </div>
+
+      {flash && (
+        <p className="flex items-center justify-center gap-1.5 bg-brand-500/20 py-1 text-[11px] font-black text-brand-300">
+          <Check className="h-3.5 w-3.5" />
+          {flash}
+        </p>
+      )}
+
+      {view === "code" ? (
+        <pre dir="ltr" className="min-h-0 flex-1 overflow-auto bg-black p-4 text-left text-[12px] leading-relaxed text-slate-300">
+          <code>{html}</code>
+        </pre>
+      ) : (
+        <div className="flex min-h-0 flex-1 justify-center bg-[radial-gradient(circle_at_50%_0%,#18181b,#050505)] sm:p-3">
+          <iframe
+            key={run}
+            title={title}
+            srcDoc={doc}
+            sandbox="allow-scripts allow-pointer-lock allow-modals allow-forms"
+            allow="fullscreen"
+            className={cn("block h-full bg-black transition-all duration-300", device !== "desktop" && "rounded-[1.6rem] ring-4 ring-white/10")}
+            style={{ width: widths[device] ? `min(100%, ${widths[device]}px)` : "100%" }}
           />
         </div>
       )}

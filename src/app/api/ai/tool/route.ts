@@ -128,7 +128,7 @@ export async function POST(req: Request) {
             messages: [{ role: "user", text: prompt.user }],
             temperature: 0.7,
             epic: true,
-            maxTokens: 64000,
+            segment: 16000,
             onModel: (m) => {
               usedModel = m;
             },

@@ -646,6 +646,8 @@ export async function streamGemini(opts: {
   maxTokens?: number;
   /** Pro "epic" builds: 3000+ line deliverables (bigger limits, multi-round continuation) */
   epic?: boolean;
+  /** Cap one request at this many tokens; the client then asks for the continuation (keeps each request far below the host time limit) */
+  segment?: number;
   /** images / PDFs attached to the LAST user turn (ignored for free tier) */
   attachments?: Attachment[];
   /** keep the strong model but skip long "thinking" (lower first-token latency) */
@@ -1040,7 +1042,7 @@ async function streamLead(
 ): Promise<{ stream: ReadableStream<string>; model: string }> {
   const key = getGeminiKey() ?? "";
   const providers = fallbackProviders();
-  const maxTokens = Math.max(opts.maxTokens ?? 0, opts.epic ? 64_000 : 32_000);
+  const maxTokens = opts.segment ?? Math.max(opts.maxTokens ?? 0, opts.epic ? 64_000 : 32_000);
   let lastErr: unknown = null;
   for (const name of leadOrder()) {
     try {
@@ -1080,8 +1082,15 @@ async function streamLead(
 export function looksCut(text: string): boolean {
   const fences = (text.match(/```/g) ?? []).length;
   if (fences % 2 === 1) return true;
-  const html = text.match(/```html[\s\S]*?(```|$)/i);
-  if (html && !/<\/html>/i.test(html[0])) return true;
+  const blocks = [...text.matchAll(/```html[ \t]*\r?\n([\s\S]*?)```/gi)];
+  for (const b of blocks) {
+    const code = b[1];
+    // a full page must end with </html>; an unclosed <script>/<style> also means a cut
+    if (/<html[\s>]/i.test(code) && !/<\/html>\s*$/i.test(code.trim())) return true;
+    const open = (code.match(/<script\b/gi) ?? []).length;
+    const close = (code.match(/<\/script>/gi) ?? []).length;
+    if (open > close) return true;
+  }
   return false;
 }
 
@@ -1155,7 +1164,7 @@ export function ensembleStream(
         }
 
         // Stage 3 — cut off by the token limit? continue once and close the file.
-        for (let round = 0; round < (opts.epic ? 4 : 1) && !cancelled && acc.length > 500 && looksCut(acc); round++) {
+        for (let round = 0; round < (opts.segment ? 0 : opts.epic ? 6 : 3) && !cancelled && acc.length > 500 && looksCut(acc); round++) {
           const origLast = opts.messages[opts.messages.length - 1];
           const cont = await streamLead(
             {
@@ -1242,7 +1251,7 @@ export function continueStream(o: { system: string; user: string; partial: strin
             system: o.system + EPIC_RULES,
             temperature: 0.7,
             epic: true,
-            maxTokens: 64_000,
+            segment: 16_000,
             messages: [
               { role: "user", text: o.user },
               { role: "model", text: o.partial },
@@ -1285,3 +1294,98 @@ export function continueStream(o: { system: string; user: string; partial: strin
     },
   });
 }
+
+
+/**
+ * NEVER-STOP guard: wraps any answer stream. When the model ends in the middle of
+ * a code block (token limit, network hiccup, engine failover) the answer is
+ * continued automatically — up to `rounds` times — until every fence / </html> is closed.
+ */
+export function withAutoContinue(
+  source: ReadableStream<string>,
+  o: {
+    system: string;
+    messages: ChatTurn[];
+    rounds?: number;
+    /** text already delivered earlier (a client-side continuation request) */
+    seed?: string;
+    onDone?: (full: string) => void | Promise<void>;
+  }
+): ReadableStream<string> {
+  let reader: ReadableStreamDefaultReader<string> | null = null;
+  let cancelled = false;
+  const fence = /^\s*```[\w-]*[ \t]*\r?\n/;
+  return new ReadableStream<string>({
+    async start(controller) {
+      let acc = o.seed ?? "";
+      const put = (t: string) => {
+        acc += t;
+        if (!cancelled) controller.enqueue(t);
+      };
+      try {
+        reader = source.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done || cancelled) break;
+          put(value);
+        }
+        const rounds = o.rounds ?? 5;
+        for (let r = 0; r < rounds && !cancelled && acc.length > 300 && looksCut(acc); r++) {
+          const lastUser = [...o.messages].reverse().find((m) => m.role === "user");
+          const cont = await streamLead(
+            {
+              system: o.system + CONTINUE_RULES,
+              temperature: 0.5,
+              segment: 24_000,
+              messages: [
+                { role: "user", text: (lastUser?.text ?? "").slice(0, 24_000) },
+                { role: "model", text: acc.slice(-90_000) },
+                { role: "user", text: CONTINUE_PROMPT },
+              ],
+            },
+            []
+          );
+          reader = cont.stream.getReader();
+          let head = "";
+          let headDone = false;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done || cancelled) break;
+            if (!headDone) {
+              head += value;
+              if (head.length < 16) continue;
+              headDone = true;
+              put(head.replace(fence, ""));
+              continue;
+            }
+            put(value);
+          }
+          if (!headDone && head) put(head.replace(fence, ""));
+        }
+      } catch (e) {
+        console.error("[auto-continue] failed:", e);
+      }
+      try {
+        await o.onDone?.(acc);
+      } catch {
+        /* persistence errors must never break the stream */
+      }
+      try {
+        controller.close();
+      } catch {
+        /* closed */
+      }
+    },
+    cancel() {
+      cancelled = true;
+      reader?.cancel().catch(() => undefined);
+    },
+  });
+}
+
+const CONTINUE_RULES = `
+
+CONTINUATION MODE: you are finishing an answer that was cut off. Output ONLY the missing remainder, starting at the exact next character. Never repeat earlier text, never add a preface, never open a new code fence. Keep names, variables, CSS classes and structure identical to the part already written. Close every open tag / bracket / function and the code fence.`;
+
+const CONTINUE_PROMPT =
+  "Your previous answer was cut off. Continue EXACTLY from the last character you wrote — no repetition, no preface, no new code fence. Finish the code, close every open tag / function / brace, end with </html> if it is a web page, then close the code fence.";

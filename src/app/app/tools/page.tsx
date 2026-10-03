@@ -30,7 +30,7 @@ export default function ToolsPage() {
       {/* v6 Pro: code analysis + game builder */}
       <section className="mb-12">
         <div className="mb-5 flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-b from-[#f0cf86] to-[#d9a94f] text-ink-950">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-b from-white to-zinc-300 text-ink-950">
             <Crown className="h-5 w-5" />
           </span>
           <div>

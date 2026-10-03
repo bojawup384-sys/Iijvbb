@@ -46,7 +46,7 @@ const P = {
     codeDownload: "تحميل",
     proFeaturesTitle: "ميزات Pro في v6",
     proFeatures: [
-      "أحدث نماذج Gemini + سرعة فائقة (طلبات متوازية)",
+      "أحدث النماذج + سرعة فائقة (طلبات متوازية)",
       "تحليل الكود: مراجعة، إصلاح، شرح، تحويل، أمان، اختبارات",
       "صانع ألعاب كامل بمعاينة حيّة وتحميل",
       "رفع الصور وملفات PDF والكود في المحادثة",
@@ -95,7 +95,7 @@ const P = {
     codeDownload: "Télécharger",
     proFeaturesTitle: "Fonctions Pro v6",
     proFeatures: [
-      "Derniers modèles Gemini + vitesse ultra (requêtes parallèles)",
+      "Derniers modèles + vitesse ultra (requêtes parallèles)",
       "Analyse de code : revue, correction, explication, conversion, sécurité, tests",
       "Créateur de jeux complet avec aperçu en direct et téléchargement",
       "Images, PDF et fichiers de code dans le chat",
@@ -144,7 +144,7 @@ const P = {
     codeDownload: "Download",
     proFeaturesTitle: "v6 Pro features",
     proFeatures: [
-      "Newest Gemini models + ultra speed (parallel requests)",
+      "Newest models + ultra speed (parallel requests)",
       "Code analysis: review, fix, explain, convert, security, tests",
       "Full game builder with live preview and download",
       "Upload images, PDFs and code files in chat",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -49,7 +49,7 @@ function GoogleMark() {
 
 export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
   const { t, dir } = useI18n();
-  const { signInEmail, signUpEmail, signInGoogle } = useAuth();
+  const { user, loading, signInEmail, signUpEmail, signInGoogle } = useAuth();
   const router = useRouter();
 
   const [name, setName] = useState("");
@@ -61,6 +61,21 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
   const [notice, setNotice] = useState<string | null>(null);
 
   const isSignup = mode === "signup";
+
+  // already signed in (e.g. pressed "back" to this page): go straight to the app
+  useEffect(() => {
+    if (!loading && user) router.replace("/app");
+  }, [loading, user, router]);
+
+  // 0–4 password strength: length, mixed case, digit, symbol
+  const strength = useMemo(() => {
+    let n = 0;
+    if (password.length >= 8) n++;
+    if (/[a-z]/.test(password) && /[A-Z]/.test(password)) n++;
+    if (/\d/.test(password)) n++;
+    if (/[^A-Za-z0-9]/.test(password) || password.length >= 12) n++;
+    return password ? Math.max(1, n) : 0;
+  }, [password]);
 
   const handleGoogle = async () => {
     setError(null);
@@ -271,9 +286,33 @@ export function AuthScreen({ mode }: { mode: "login" | "signup" }) {
                 </button>
               </div>
               {isSignup && (
-                <p className="-mt-1 text-xs text-slate-500">
-                  {t.auth.passwordHint}
-                </p>
+                <div className="-mt-1 space-y-1.5">
+                  <div className="flex gap-1.5" aria-hidden>
+                    {[1, 2, 3, 4].map((i) => (
+                      <span
+                        key={i}
+                        className={cn(
+                          "h-1.5 flex-1 rounded-full transition-colors duration-300",
+                          i <= strength
+                            ? strength <= 1
+                              ? "bg-rose-400"
+                              : strength === 2
+                                ? "bg-amber-400"
+                                : "bg-brand-400"
+                            : "bg-white/10"
+                        )}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    {t.auth.passwordHint}
+                    {password && (
+                      <span className="ms-1.5 font-bold text-slate-300">
+                        {strength <= 1 ? "· ضعيفة" : strength === 2 ? "· متوسطة" : strength === 3 ? "· قوية" : "· ممتازة"}
+                      </span>
+                    )}
+                  </p>
+                </div>
               )}
 
               {!isSignup && (

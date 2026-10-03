@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Crown, Gamepad2, LayoutTemplate, Palette, PenTool, Smartphone, Trash2, Wand2 } from "lucide-react";
+import { Code2, Crown, Gamepad2, LayoutTemplate, Palette, PenTool, Smartphone, Trash2, Wand2 } from "lucide-react";
 import { useCredits } from "@/components/app/app-shell";
 import { GamePreview } from "@/components/game-preview";
+import { useAuth } from "@/lib/auth-context";
 
-type Item = { id: number; title: string; html: string; at: number };
+type Item = { id: string; title: string; html: string };
 
 const CREATE = [
   { id: "landing-builder", label: "صفحة هبوط", Icon: LayoutTemplate },
@@ -19,20 +20,49 @@ const CREATE = [
 export default function StudioPage() {
   const { profile } = useCredits();
   const isPro = profile?.plan === "pro";
+  const { authFetch } = useAuth();
   const [items, setItems] = useState<Item[]>([]);
   const [open, setOpen] = useState<Item | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      setItems(JSON.parse(localStorage.getItem("barq_gallery") ?? "[]"));
-    } catch {}
-  }, []);
+    let alive = true;
+    (async () => {
+      try {
+        const r = await authFetch("/api/projects");
+        let list: Item[] = r.ok ? ((await r.json()) as { projects: Item[] }).projects : [];
+        // one-time move of the old on-device gallery into the database
+        if (r.ok && list.length === 0) {
+          try {
+            const old: { title: string; html: string }[] = JSON.parse(localStorage.getItem("barq_gallery") ?? "[]");
+            for (const o of old.slice(0, 12)) {
+              await authFetch("/api/projects", { method: "POST", body: JSON.stringify({ title: o.title, html: o.html }) });
+            }
+            if (old.length) {
+              localStorage.removeItem("barq_gallery");
+              const r2 = await authFetch("/api/projects");
+              if (r2.ok) list = ((await r2.json()) as { projects: Item[] }).projects;
+            }
+          } catch {
+            /* nothing to move */
+          }
+        }
+        if (alive) setItems(list);
+      } catch {
+        /* offline */
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [authFetch]);
 
-  const remove = (id: number) => {
-    const next = items.filter((i) => i.id !== id);
-    setItems(next);
+  const remove = async (id: string) => {
+    setItems((l) => l.filter((i) => i.id !== id));
     if (open?.id === id) setOpen(null);
-    try { localStorage.setItem("barq_gallery", JSON.stringify(next)); } catch {}
+    await authFetch(`/api/projects?id=${id}`, { method: "DELETE" }).catch(() => undefined);
   };
 
   return (
@@ -41,16 +71,20 @@ export default function StudioPage() {
         <div>
           <h1 className="flex items-center gap-2.5 text-3xl font-black text-white sm:text-4xl">
             <Wand2 className="h-8 w-8 text-amber-300" />
-            استوديو برق
+            الاستوديو
           </h1>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-400">
             اصنع صفحات وواجهات وألعابًا وخلفيات وشعارات، جرّبها على الهاتف والحاسوب، واحفظ أفضلها هنا.
           </p>
         </div>
+        <Link href="/app/studio/build" className="btn-primary px-5 py-2.5 text-sm">
+          <Code2 className="h-4 w-4" />
+          محرك البناء الحي
+        </Link>
         {!isPro && (
           <Link href="/app/upgrade" className="btn-primary px-5 py-2.5 text-sm">
             <Crown className="h-4 w-4" />
-            افتح الاستوديو بـ v6 Pro
+            فعّل Pro
           </Link>
         )}
       </header>
@@ -71,7 +105,9 @@ export default function StudioPage() {
       </div>
 
       <h2 className="mb-4 text-sm font-black text-slate-300">أعمالي المحفوظة ({items.length})</h2>
-      {items.length === 0 ? (
+      {loading ? (
+        <div className="shimmer-line h-40 rounded-2xl" />
+      ) : items.length === 0 ? (
         <p className="glass rounded-2xl p-8 text-center text-sm text-slate-400">
           لا توجد أعمال بعد. أنشئ شيئًا ثم اضغط «حفظ» فوق المعاينة.
         </p>
@@ -90,7 +126,7 @@ export default function StudioPage() {
               </button>
               <div className="flex items-center justify-between gap-2 p-3">
                 <p className="truncate text-sm font-black text-white">{it.title}</p>
-                <button type="button" aria-label="حذف" onClick={() => remove(it.id)} className="text-slate-500 hover:text-rose-300">
+                <button type="button" aria-label="حذف" onClick={() => void remove(it.id)} className="text-slate-500 hover:text-rose-300">
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>

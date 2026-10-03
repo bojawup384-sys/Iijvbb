@@ -65,6 +65,41 @@ create table if not exists barq.orders (
 );
 create index if not exists orders_user_idx on barq.orders (user_id);
 
+alter table barq.users add column if not exists provider text not null default 'password';
+alter table barq.users add column if not exists email_verified boolean not null default false;
+alter table barq.users add column if not exists login_count integer not null default 0;
+alter table barq.users add column if not exists pref_tier text not null default 'v6';
+alter table barq.users add column if not exists last_login_at timestamptz;
+
+create table if not exists barq.ai_memories (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references barq.users(id) on delete cascade,
+  content text not null,
+  source text not null default 'user',
+  created_at timestamptz not null default now()
+);
+create index if not exists mem_user_idx on barq.ai_memories (user_id, created_at);
+
+create table if not exists barq.projects (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references barq.users(id) on delete cascade,
+  title text not null default '',
+  html text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists proj_user_idx on barq.projects (user_id, updated_at);
+
+create table if not exists barq.login_events (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null references barq.users(id) on delete cascade,
+  kind text not null default 'login',
+  provider text not null default 'password',
+  user_agent text not null default '',
+  created_at timestamptz not null default now()
+);
+create index if not exists login_user_idx on barq.login_events (user_id, created_at);
+
 create table if not exists barq.promo_codes (
   code text primary key,
   plan text not null default 'pro',

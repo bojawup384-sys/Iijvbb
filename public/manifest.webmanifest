@@ -9,8 +9,8 @@
   "orientation": "portrait",
   "dir": "auto",
   "lang": "ar",
-  "background_color": "#08100d",
-  "theme_color": "#08100d",
+  "background_color": "#050505",
+  "theme_color": "#050505",
   "categories": ["productivity", "education", "business"],
   "icons": [
     {

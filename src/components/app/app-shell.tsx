@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  ChevronRight,
   Crown,
   History,
   LayoutGrid,
@@ -73,7 +74,7 @@ export function ProBadge({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "pro-shine inline-flex items-center gap-1 rounded-md bg-gradient-to-b from-[#f0cf86] to-[#d9a94f] px-1.5 py-0.5 text-[10px] font-black leading-none text-ink-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]",
+        "pro-shine inline-flex items-center gap-1 rounded-md bg-gradient-to-b from-white to-zinc-300 px-1.5 py-0.5 text-[10px] font-black leading-none text-ink-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]",
         className
       )}
     >
@@ -280,10 +281,26 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* ---------------- mobile top bar ---------------- */}
         <header className="z-40 flex shrink-0 items-center justify-between border-b border-white/6 bg-ink-950/90 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:hidden">
-          <Link href="/" className="flex items-center gap-2">
-            <Logo size={30} />
-            {profile?.plan === "pro" && <ProBadge />}
-          </Link>
+          <div className="flex items-center gap-2">
+            {pathname !== "/app" && (
+              <button
+                type="button"
+                onClick={() => {
+                  // a real "back": history if there is one, otherwise the chat
+                  if (window.history.length > 1) router.back();
+                  else router.replace("/app");
+                }}
+                aria-label="رجوع"
+                className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-200 transition active:scale-90"
+              >
+                <ChevronRight className="h-5 w-5 rtl:rotate-0 ltr:rotate-180" />
+              </button>
+            )}
+            <Link href="/" className="flex items-center gap-2">
+              <Logo size={30} />
+              {profile?.plan === "pro" && <ProBadge />}
+            </Link>
+          </div>
           <div className="flex items-center gap-2">
             <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-black text-slate-200">
               <Coins className="h-3.5 w-3.5 text-aqua-400" />
@@ -298,7 +315,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* ---------------- mobile bottom nav ---------------- */}
         <nav className="app-bottom-nav z-40 shrink-0 border-t border-white/10 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] lg:hidden">
-          <div className="grid grid-cols-5">
+          <div className="grid grid-cols-6">
             {nav.map((item) => {
               const active = isActive(item.href, item.exact);
               return (
@@ -354,7 +371,7 @@ export function UserAvatar({
   const initial = (name ?? "B").trim().charAt(0).toUpperCase() || "B";
   return (
     <span
-      className="grid shrink-0 place-items-center rounded-full bg-brand-600 font-bold text-white"
+      className="grid shrink-0 place-items-center rounded-full bg-white font-bold text-ink-950"
       style={{ width: size, height: size, fontSize: size * 0.42 }}
     >
       {initial}

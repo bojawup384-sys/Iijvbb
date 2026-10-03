@@ -165,3 +165,24 @@ export async function takeCredit(
     return null;
   }
 }
+
+
+/** Real sign-in / sign-up bookkeeping (counter + last login + security trail). */
+export async function recordLogin(
+  uid: string,
+  o: { kind: "login" | "signup"; provider: string; emailVerified: boolean; userAgent: string }
+): Promise<void> {
+  const provider = o.provider === "google" ? "google" : "password";
+  await db.execute(sql`
+    update barq.users
+    set login_count = login_count + 1,
+        last_login_at = now(),
+        provider = ${provider},
+        email_verified = ${o.emailVerified}
+    where id = ${uid}
+  `);
+  await db.execute(sql`
+    insert into barq.login_events (user_id, kind, provider, user_agent)
+    values (${uid}, ${o.kind}, ${provider}, ${o.userAgent.slice(0, 200)})
+  `);
+}

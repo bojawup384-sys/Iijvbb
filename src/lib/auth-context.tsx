@@ -16,6 +16,8 @@ import {
   signInWithPopup,
   signOut as fbSignOut,
   updateProfile,
+  sendEmailVerification,
+  getAdditionalUserInfo,
   type User,
 } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
@@ -33,7 +35,7 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-async function syncUser(u: User) {
+async function syncUser(u: User, event?: "login" | "signup", provider?: string) {
   try {
     const token = await u.getIdToken();
     await fetch("/api/user/sync", {
@@ -46,6 +48,9 @@ async function syncUser(u: User) {
         email: u.email,
         displayName: u.displayName,
         photoUrl: u.photoURL,
+        ...(event
+          ? { event, provider: provider ?? "password", emailVerified: u.emailVerified }
+          : {}),
       }),
     });
   } catch {
@@ -68,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInEmail = useCallback(async (email: string, password: string) => {
     const cred = await signInWithEmailAndPassword(auth, email, password);
-    await syncUser(cred.user);
+    await syncUser(cred.user, "login", "password");
   }, []);
 
   const signUpEmail = useCallback(
@@ -77,14 +82,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (name.trim()) {
         await updateProfile(cred.user, { displayName: name.trim() });
       }
-      await syncUser(cred.user);
+      // a real verification e-mail (non-blocking: the account works immediately)
+      sendEmailVerification(cred.user).catch(() => undefined);
+      await syncUser(cred.user, "signup", "password");
     },
     []
   );
 
   const signInGoogle = useCallback(async () => {
     const cred = await signInWithPopup(auth, googleProvider);
-    await syncUser(cred.user);
+    const isNew = getAdditionalUserInfo(cred)?.isNewUser === true;
+    await syncUser(cred.user, isNew ? "signup" : "login", "google");
   }, []);
 
   const signOut = useCallback(async () => {

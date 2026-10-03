@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Download, Play } from "lucide-react";
+import { Check, Copy, Download, Maximize2, Play } from "lucide-react";
 import { usePro } from "@/lib/pro-i18n";
-import { GamePreview } from "@/components/game-preview";
+import { FullPreview, GamePreview } from "@/components/game-preview";
 
 const EXT: Record<string, string> = {
   javascript: "js", js: "js", typescript: "ts", ts: "ts", tsx: "tsx", jsx: "jsx",
@@ -25,6 +25,7 @@ export function CodeBlock({
   const p = usePro();
   const [copied, setCopied] = useState(false);
   const [play, setPlay] = useState(false);
+  const [full, setFull] = useState(false);
   const isHtml = /^(html|htm)$/i.test(lang);
   const canPlay = pro && isHtml && /<(canvas|script|body|div)/i.test(code);
 
@@ -69,6 +70,12 @@ export function CodeBlock({
               {play ? p.gameCode : p.codePreview}
             </button>
           )}
+          {canPlay && (
+            <button type="button" className={btn} onClick={() => setFull(true)}>
+              <Maximize2 className="h-3.5 w-3.5 text-amber-300" />
+              شاشة كاملة
+            </button>
+          )}
           <button type="button" className={btn} onClick={download}>
             <Download className="h-3.5 w-3.5" />
             {p.codeDownload}
@@ -83,6 +90,7 @@ export function CodeBlock({
           </button>
         </div>
       </div>
+      {full && <FullPreview html={code} onClose={() => setFull(false)} />}
       {play ? (
         <GamePreview html={code} className="rounded-t-none" />
       ) : (

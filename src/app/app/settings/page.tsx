@@ -13,6 +13,7 @@ import {
   Bell,
   HardDrive,
   ShieldCheck,
+  Brain,
 } from "lucide-react";
 import { Row } from "@/components/settings-ui";
 import { motion } from "framer-motion";
@@ -93,6 +94,7 @@ export default function SettingsPage() {
         {/* sections — each opens its own page */}
         <section className="space-y-3">
           <Row icon={Globe} title={t.common.language} desc={LOCALE_NAMES[locale]} href="/app/settings/language" />
+          <Row icon={Brain} title="ذاكرة برق" desc="ما يتذكره برق عنك في كل محادثة" href="/app/settings/memory" />
           <Row icon={ShieldCheck} title="الخصوصية" desc="حذف المحادثات والسياسات" href="/app/settings/privacy" />
           <Row icon={Bell} title="الإشعارات" desc="تذكيرات وعروض" href="/app/settings/notifications" />
           <Row icon={HardDrive} title="التخزين" desc="مسح الذاكرة المؤقتة" href="/app/settings/storage" />

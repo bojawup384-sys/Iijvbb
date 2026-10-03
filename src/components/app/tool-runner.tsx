@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -20,7 +20,7 @@ import { loc, type ToolDef } from "@/lib/tools";
 import { useCredits } from "@/components/app/app-shell";
 import { ACCENTS } from "@/components/tool-card";
 import { Markdown } from "@/components/markdown";
-import { GamePreview } from "@/components/game-preview";
+import { FullPreview, GamePreview } from "@/components/game-preview";
 import { usePro } from "@/lib/pro-i18n";
 import { extractHtml } from "@/lib/attachments";
 import { cn } from "@/lib/utils";
@@ -31,6 +31,10 @@ function cutOff(text: string): boolean {
   const m = text.match(/```html[\s\S]*?(```|$)/i);
   return !!m && !/<\/html>/i.test(m[0]);
 }
+
+type WakeNav = Navigator & {
+  wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> };
+};
 
 type ErrKind = "quota" | "nokey" | "busy" | "generic" | "pro" | null;
 
@@ -58,6 +62,8 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
   const [errDetail, setErrDetail] = useState("");
   const [copied, setCopied] = useState(false);
   const [part, setPart] = useState(0);
+  const [note, setNote] = useState("");
+  const wake = useRef<{ release: () => Promise<void> } | null>(null);
 
   const accent = ACCENTS[tool.accent];
   const Icon = tool.icon;
@@ -65,10 +71,98 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
   const locked = !!tool.pro && !!profile && !isPro;
   const gameHtml =
     tool.kind === "game" && !streaming && result ? extractHtml(result) : null;
+  // a finished build opens by itself in a full-screen live preview
+  const [autoFull, setAutoFull] = useState<string | null>(null);
+  const autoSeen = useRef("");
+  useEffect(() => {
+    if (gameHtml && gameHtml.length > 1500 && autoSeen.current !== gameHtml) {
+      autoSeen.current = gameHtml;
+      const id = setTimeout(() => setAutoFull(gameHtml), 300);
+      return () => clearTimeout(id);
+    }
+  }, [gameHtml]);
 
   const setVal = (k: string, v: string) => {
     setMissing(null);
     setValues((p) => ({ ...p, [k]: v }));
+  };
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  const pump = async (r: Response, base: string) => {
+    const reader = r.body?.getReader();
+    if (!reader) return base;
+    const decoder = new TextDecoder();
+    let acc = base;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      // repaint ~16×/s instead of once per chunk (keeps long results smooth)
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        if (!timer) {
+          timer = setTimeout(() => {
+            timer = null;
+            setResult(acc);
+          }, 60);
+        }
+      }
+    } catch {
+      /* connection cut: keep what we have, the loop below continues from it */
+    }
+    if (timer) clearTimeout(timer);
+    acc += decoder.decode();
+    setResult(acc);
+    return acc;
+  };
+
+  /** Never stop halfway: keep requesting the missing tail (retrying on failures) until the file is closed. */
+  const finish = async (start: string) => {
+    let acc = start;
+    let fails = 0;
+    setNote("");
+    for (let i = 0; i < 16 && cutOff(acc); i++) {
+      setPart(i + 2);
+      try {
+        const r = await authFetch("/api/ai/tool", {
+          method: "POST",
+          body: JSON.stringify({ tool: tool.id, inputs: values, outLang, locale, continueFrom: acc }),
+        });
+        if (!r.ok) {
+          setNote(`HTTP ${r.status}`);
+          if (++fails > 3) break;
+          await sleep(2500);
+          i--;
+          continue;
+        }
+        const next = await pump(r, acc);
+        if (next.length - acc.length < 40) {
+          if (++fails > 3) break;
+          await sleep(2500);
+          i--;
+          continue;
+        }
+        fails = 0;
+        acc = next;
+      } catch {
+        if (++fails > 3) break;
+        await sleep(2500);
+        i--;
+      }
+    }
+    setPart(0);
+    return acc;
+  };
+
+  const resume = async () => {
+    setStreaming(true);
+    setError(null);
+    try {
+      await finish(result);
+    } finally {
+      setStreaming(false);
+    }
   };
 
   const run = async () => {
@@ -80,6 +174,11 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
     setStreaming(true);
     setResult("");
     setRan(true);
+    try {
+      wake.current = (await (navigator as WakeNav).wakeLock?.request("screen")) ?? null;
+    } catch {
+      /* not supported */
+    }
     setError(null);
     setModelUsed("");
     try {
@@ -117,60 +216,15 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
       }
       applyHeaders(res);
       setModelUsed(res.headers.get("x-model") ?? "");
-      const pump = async (r: Response, base: string) => {
-        const reader = r.body?.getReader();
-        if (!reader) return base;
-        const decoder = new TextDecoder();
-        let acc = base;
-        let timer: ReturnType<typeof setTimeout> | null = null;
-        try {
-          // repaint ~16×/s instead of once per chunk (keeps long results smooth)
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            acc += decoder.decode(value, { stream: true });
-            if (!timer) {
-              timer = setTimeout(() => {
-                timer = null;
-                setResult(acc);
-              }, 60);
-            }
-          }
-        } catch {
-          /* connection cut by the server time limit: keep what we have, then continue */
-        }
-        if (timer) clearTimeout(timer);
-        acc += decoder.decode();
-        setResult(acc);
-        return acc;
-      };
-      let acc = await pump(res, "");
-      if (!acc.trim()) {
-        setError("generic");
-      } else if (tool.kind === "game") {
-        // never stop halfway: keep asking for the missing tail until the file is complete
-        for (let i = 0; i < 8 && cutOff(acc); i++) {
-          setPart(i + 2);
-          let r: Response;
-          try {
-            r = await authFetch("/api/ai/tool", {
-              method: "POST",
-              body: JSON.stringify({ tool: tool.id, inputs: values, outLang, locale, continueFrom: acc }),
-            });
-          } catch {
-            break;
-          }
-          if (!r.ok) break;
-          const next = await pump(r, acc);
-          if (next.length - acc.length < 40) break;
-          acc = next;
-        }
-        setPart(0);
-      }
+      const acc = await pump(res, "");
+      if (!acc.trim()) setError("generic");
+      else if (tool.kind === "game") await finish(acc);
     } catch {
       setError("generic");
     } finally {
       setStreaming(false);
+      void wake.current?.release().catch(() => undefined);
+      wake.current = null;
     }
   };
 
@@ -206,7 +260,7 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
             <h1 className="flex items-center gap-2 text-xl font-black text-white sm:text-2xl">
               {loc(tool.name, locale)}
               {tool.pro && (
-                <span className="rounded-md bg-gradient-to-b from-[#f0cf86] to-[#d9a94f] px-1.5 py-0.5 text-[10px] font-black leading-none text-ink-950">
+                <span className="rounded-md bg-gradient-to-b from-white to-zinc-300 px-1.5 py-0.5 text-[10px] font-black leading-none text-ink-950">
                   PRO
                 </span>
               )}
@@ -424,9 +478,20 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
                 </div>
               )}
               {tool.kind === "game" && !streaming && result && !gameHtml && (
-                <p className="mb-3 text-sm font-bold text-amber-200">{pro.gameNoCode}</p>
+                <div className="mb-3 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4">
+                  <p className="flex-1 text-sm font-bold text-amber-200">
+                    {cutOff(result) ? "توقّف الكود قبل نهايته. اضغط لإكمال اللعبة من حيث وصل." : pro.gameNoCode}
+                    {note ? ` (${note})` : ""}
+                  </p>
+                  {cutOff(result) && (
+                    <button type="button" onClick={resume} className="btn-primary px-5 py-2.5 text-sm">
+                      أكمل اللعبة
+                    </button>
+                  )}
+                </div>
               )}
               {gameHtml && <GamePreview html={gameHtml} className="mb-5" height={520} />}
+              {autoFull && <FullPreview html={autoFull} onClose={() => setAutoFull(null)} />}
               {result && !(tool.kind === "game" && streaming) && (
                 <>
                   <Markdown pro={isPro} plainCode={streaming}>

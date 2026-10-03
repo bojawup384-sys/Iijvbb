@@ -76,12 +76,12 @@ export function Marquee() {
       <div
         aria-hidden
         className="pointer-events-none absolute inset-y-0 start-0 z-10 w-24"
-        style={{ background: "linear-gradient(to right, #08100d, transparent)" }}
+        style={{ background: "linear-gradient(to right, #050505, transparent)" }}
       />
       <div
         aria-hidden
         className="pointer-events-none absolute inset-y-0 end-0 z-10 w-24"
-        style={{ background: "linear-gradient(to left, #08100d, transparent)" }}
+        style={{ background: "linear-gradient(to left, #050505, transparent)" }}
       />
       <div className="flex w-max animate-marquee items-center gap-8 [animation-direction:reverse]">
         {items.map((item, i) => (

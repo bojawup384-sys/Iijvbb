@@ -18,7 +18,7 @@ export function Logo({
     <span className={cn("inline-flex items-center gap-2.5", className)}>
       <span
         aria-hidden
-        className="grid shrink-0 place-items-center bg-brand-600 font-bold leading-none text-[#faf4e6]"
+        className="grid shrink-0 place-items-center bg-white font-bold leading-none text-ink-950"
         style={{
           width: size,
           height: size,

@@ -23,6 +23,11 @@ export const users = barq.table("users", {
   creditsUsed: integer("credits_used").notNull().default(0),
   usageDay: text("usage_day"), // YYYY-MM-DD (Africa/Algiers)
   totalRuns: integer("total_runs").notNull().default(0),
+  provider: text("provider").notNull().default("password"), // password | google
+  emailVerified: boolean("email_verified").notNull().default(false),
+  loginCount: integer("login_count").notNull().default(0),
+  prefTier: text("pref_tier").notNull().default("v6"), // v4 | v5 | v6
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -114,5 +119,60 @@ export const promoCodes = barq.table("promo_codes", {
     .defaultNow()
     .notNull(),
 });
+
+/** Long-term memory: facts the AI keeps about the user across every conversation. */
+export const aiMemories = barq.table(
+  "ai_memories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    source: text("source").notNull().default("user"), // user | auto
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("mem_user_idx").on(t.userId, t.createdAt)]
+);
+
+/** Saved creations (games / sites / designs) — replaces the old localStorage gallery. */
+export const projects = barq.table(
+  "projects",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default(""),
+    html: text("html").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("proj_user_idx").on(t.userId, t.updatedAt)]
+);
+
+/** Security trail: every real sign-in / sign-up. */
+export const loginEvents = barq.table(
+  "login_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("login"), // signup | login
+    provider: text("provider").notNull().default("password"),
+    userAgent: text("user_agent").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("login_user_idx").on(t.userId, t.createdAt)]
+);
 
 export type DbUser = typeof users.$inferSelect;

@@ -1,4 +1,5 @@
 /** Client-side preparation of chat attachments (Pro). Nothing here touches the network. */
+import { readZip, zipToPrompt } from "@/lib/zip";
 
 export type PendingFile = {
   id: number;
@@ -24,6 +25,7 @@ const TEXT_EXT = new Set([
 
 const MAX_PDF = 2_500_000; // bytes
 const MAX_TEXT = 200_000; // bytes
+const MAX_ZIP = 12_000_000; // bytes (read locally, only the text inside is sent)
 const MAX_IMG_SIDE = 1600;
 
 let counter = 0;
@@ -92,6 +94,15 @@ export async function prepareFile(
           mime: "application/pdf",
           data: await readB64(file),
         },
+      };
+    }
+    if (extOf(file.name) === "zip" || file.type === "application/zip" || file.type === "application/x-zip-compressed") {
+      if (file.size > MAX_ZIP) return { ok: false, problem: "big" };
+      const r = await readZip(file);
+      if (r.files.length === 0) return { ok: false, problem: "bad" };
+      return {
+        ok: true,
+        file: { id: ++counter, name: file.name, kind: "text", text: zipToPrompt(file.name, r) },
       };
     }
     const isText =

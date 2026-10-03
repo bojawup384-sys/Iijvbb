@@ -4,6 +4,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -25,8 +26,11 @@ import {
   Lightbulb,
   Lock,
   MessageSquarePlus,
+  Maximize2,
   Mic,
+  Package,
   Paperclip,
+  RefreshCw,
   PanelRight,
   PenLine,
   RotateCcw,
@@ -46,12 +50,21 @@ import { useCredits, UserAvatar } from "@/components/app/app-shell";
 import { Markdown } from "@/components/markdown";
 import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
+import { FullPreview } from "@/components/game-preview";
+import {
+  codeLooksCut,
+  createZip,
+  downloadBlob,
+  filesFromReply,
+  zipSizeLabel,
+} from "@/lib/zip";
 import { usePro } from "@/lib/pro-i18n";
 import {
   MAX_FILES,
   MAX_PAYLOAD,
   payloadSize,
   prepareFile,
+  extractHtml,
   type PendingFile,
 } from "@/lib/attachments";
 
@@ -154,6 +167,9 @@ const MessageRow = memo(function MessageRow({
   copyLabel,
   copiedLabel,
   pro,
+  isLast,
+  onPreview,
+  onRegenerate,
 }: {
   m: Msg;
   name: string | null;
@@ -162,54 +178,69 @@ const MessageRow = memo(function MessageRow({
   copyLabel: string;
   copiedLabel: string;
   pro: boolean;
+  isLast: boolean;
+  onPreview: (html: string) => void;
+  onRegenerate: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const isUser = m.role === "user";
+  const done = !isUser && !m.pending && !!m.content;
+  const html = useMemo(() => (done && pro ? extractHtml(m.content) : null), [done, pro, m.content]);
+  const zipFiles = useMemo(
+    () => (done && pro && m.content.includes("```") ? filesFromReply(m.content) : []),
+    [done, pro, m.content]
+  );
+  const showZip =
+    zipFiles.length > 1 && zipFiles.some((f) => typeof f.data === "string" && f.data.length > 400);
+
+  const act =
+    "inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-bold text-slate-400 transition active:scale-95 hover:bg-white/[0.07] hover:text-slate-100";
+
+  if (isUser) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="flex w-full justify-end gap-2.5"
+      >
+        <div className="max-w-[86%] min-w-0 sm:max-w-[78%]">
+          <div className="rounded-3xl rounded-se-lg bg-zinc-900 px-4.5 py-3 text-[16px] leading-[1.75] text-white ring-1 ring-zinc-700">
+            <p className="whitespace-pre-wrap break-words">{m.content}</p>
+            {m.files && m.files.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {m.files.map((f, i) => (
+                  <span
+                    key={`${f}-${i}`}
+                    className="inline-flex max-w-full items-center gap-1 rounded-lg bg-black/25 px-2 py-1 text-[11px] font-semibold text-white/90"
+                  >
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span dir="ltr" className="truncate">{f}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <UserAvatar name={name} photo={photo} size={32} />
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className={cn("flex w-full gap-3", isUser ? "justify-end" : "justify-start")}
+      className="flex w-full gap-3"
     >
-      {!isUser && (
-        <span className="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-brand-600 text-base font-bold leading-none text-[#faf4e6] ring-1 ring-white/10">
-          ب
-        </span>
-      )}
+      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white text-base font-bold leading-none text-ink-950 ring-1 ring-white/15">
+        ب
+      </span>
 
-      <div
-        className={cn(
-          "min-w-0",
-          isUser ? "max-w-[86%] sm:max-w-[78%]" : "max-w-[calc(100%-2.75rem)] flex-1"
-        )}
-      >
-        <div
-          className={cn(
-            isUser
-              ? "rounded-2xl rounded-se-md bg-brand-600 px-4 py-3 text-[16px] leading-relaxed text-white ring-1 ring-white/10"
-              : "rounded-2xl rounded-ss-md border border-aqua-300/10 bg-ink-900/90 px-4 py-3.5 text-slate-100"
-          )}
-        >
-          {isUser ? (
-            <>
-              <p className="whitespace-pre-wrap break-words">{m.content}</p>
-              {m.files && m.files.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {m.files.map((f, i) => (
-                    <span
-                      key={`${f}-${i}`}
-                      className="inline-flex max-w-full items-center gap-1 rounded-lg bg-black/20 px-2 py-1 text-[11px] font-semibold text-white/90"
-                    >
-                      <FileText className="h-3 w-3 shrink-0" />
-                      <span dir="ltr" className="truncate">{f}</span>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </>
-          ) : m.pending && !m.content ? (
+      <div className="min-w-0 flex-1">
+        <div className="text-[16px] leading-[1.85] text-slate-100">
+          {m.pending && !m.content ? (
             <ThinkingOrb label={thinking} />
           ) : (
             <Markdown pro={pro} plainCode={!!m.pending}>
@@ -218,28 +249,57 @@ const MessageRow = memo(function MessageRow({
           )}
         </div>
 
-        {!isUser && !m.pending && m.content && (
+        {showZip && (
           <button
             type="button"
-            onClick={async () => {
-              if (await copyText(m.content)) {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1600);
-              }
-            }}
-            className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-white/5 hover:text-slate-200"
+            onClick={() => downloadBlob(createZip(zipFiles), "barq-project.zip")}
+            className="mt-3 flex w-full max-w-sm items-center gap-3 rounded-2xl border border-amber-300/25 bg-gradient-to-l from-amber-300/10 to-brand-500/10 p-3 text-start transition active:scale-[0.99] hover:border-amber-300/50"
           >
-            {copied ? (
-              <Check className="h-3.5 w-3.5 text-brand-400" />
-            ) : (
-              <Copy className="h-3.5 w-3.5" />
-            )}
-            {copied ? copiedLabel : copyLabel}
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-amber-300/20 text-amber-200">
+              <Package className="h-5 w-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span dir="ltr" className="block truncate text-start text-sm font-black text-white">barq-project.zip</span>
+              <span className="block text-[11px] font-bold text-slate-400">
+                {zipFiles.length} ملفات · {zipSizeLabel(zipFiles)} · اضغط للتحميل
+              </span>
+            </span>
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-ink-950">
+              <Download className="h-4.5 w-4.5" />
+            </span>
           </button>
         )}
-      </div>
 
-      {isUser && <UserAvatar name={name} photo={photo} size={32} />}
+        {done && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-0.5">
+            <button
+              type="button"
+              onClick={async () => {
+                if (await copyText(m.content)) {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1600);
+                }
+              }}
+              className={act}
+            >
+              {copied ? <Check className="h-4 w-4 text-brand-400" /> : <Copy className="h-4 w-4" />}
+              {copied ? copiedLabel : copyLabel}
+            </button>
+            {html && html.length > 800 && (
+              <button type="button" onClick={() => onPreview(html)} className={cn(act, "text-amber-200/90")}>
+                <Maximize2 className="h-4 w-4" />
+                معاينة كاملة
+              </button>
+            )}
+            {isLast && (
+              <button type="button" onClick={onRegenerate} className={act}>
+                <RefreshCw className="h-4 w-4" />
+                إعادة
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </motion.div>
   );
 });
@@ -270,12 +330,17 @@ export function ChatPage() {
   const [deep, setDeep] = useState(false);
   const router = useRouter();
   const [tier, setTier] = useState<"v4" | "v5" | "v6">("v6");
+  const [preview, setPreview] = useState<string | null>(null);
   useEffect(() => {
     try {
       const v = localStorage.getItem("barq_tier");
       if (v === "v4" || v === "v5" || v === "v6") setTier(v);
     } catch {}
   }, []);
+  // a Pro account never runs on the free engine: 4 → 5
+  useEffect(() => {
+    if (isPro && tier === "v4") setTier("v5");
+  }, [isPro, tier]);
   const pickTier = (v: "v4" | "v5" | "v6") => {
     if (v !== "v4" && !isPro) {
       router.push("/app/upgrade");
@@ -420,8 +485,8 @@ export function ChatPage() {
   }, []);
 
   const send = useCallback(
-    async (text: string, retry = false) => {
-      const sendFiles = retry ? lastFilesRef.current : files;
+    async (text: string, retry = false, baseOverride?: Msg[]) => {
+      const sendFiles = retry ? lastFilesRef.current : baseOverride ? [] : files;
       const content = text.trim() || (sendFiles.length > 0 ? pro.defaultAsk : "");
       if (!content || streaming) return;
       lastTextRef.current = text.trim();
@@ -437,7 +502,7 @@ export function ChatPage() {
 
       // on retry the failed user message is already on screen: don't duplicate it
       const base =
-        retry && msgs[msgs.length - 1]?.role === "user" ? msgs.slice(0, -1) : msgs;
+        baseOverride ?? (retry && msgs[msgs.length - 1]?.role === "user" ? msgs.slice(0, -1) : msgs);
       const history = base.map((m) => ({ role: m.role, content: m.content }));
       setMsgs([
         ...base,
@@ -536,9 +601,50 @@ export function ChatPage() {
           schedule();
         }
         acc += decoder.decode();
+
+        // NEVER STOP IN THE MIDDLE OF CODE: if the answer still ends inside a code
+        // block (limit / network), ask the server to finish it — up to 4 times.
+        if (isPro) {
+          for (let r = 0; r < 4 && mine() && codeLooksCut(acc); r++) {
+            try {
+              const cres = await authFetch("/api/ai/chat", {
+                method: "POST",
+                body: JSON.stringify({
+                  conversationId: newConvId || convId,
+                  messages: [...history, { role: "user", content }],
+                  continueFrom: acc,
+                  v6: tier === "v6",
+                }),
+                signal: controller.signal,
+              });
+              if (!cres.ok || !cres.body) break;
+              const cr = cres.body.getReader();
+              const before = acc.length;
+              for (;;) {
+                const { done, value } = await cr.read();
+                if (done) break;
+                acc += decoder.decode(value, { stream: true });
+                schedule();
+              }
+              acc += decoder.decode();
+              if (acc.length === before) break; // nothing new: stop retrying
+            } catch {
+              break;
+            }
+          }
+        }
+
         if (timer) clearTimeout(timer);
         flush();
         setMsgs((m) => m.map((x) => (x.pending ? { ...x, pending: false } : x)));
+
+        // finished a real web build → open the live preview full-screen by itself
+        if (isPro && mine() && !codeLooksCut(acc)) {
+          const page = extractHtml(acc);
+          if (page && page.length > 1500 && /<(canvas|script|body)/i.test(page)) {
+            setTimeout(() => setPreview(page), 350);
+          }
+        }
         // refresh conversation list (title may be new)
         setTimeout(() => void loadConvs(), 400);
       } catch (e) {
@@ -565,6 +671,23 @@ export function ChatPage() {
     },
     [msgs, streaming, convId, authFetch, applyHeaders, loadConvs, files, isPro, deep, tier, pro.defaultAsk]
   );
+
+  const regenerate = useCallback(() => {
+    if (streaming) return;
+    let idx = -1;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === "user") {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) return;
+    void send(msgs[idx].content, false, msgs.slice(0, idx));
+  }, [msgs, streaming, send]);
+
+  const regenRef = useRef(regenerate);
+  regenRef.current = regenerate;
+  const onRegen = useCallback(() => regenRef.current(), []);
 
   /* ---------- Pro: attachments, voice, export ---------- */
 
@@ -800,14 +923,35 @@ export function ChatPage() {
                 <PanelRight className="h-4 w-4" />
                 {t.app.recentChats}
               </button>
-              <button
-                type="button"
-                onClick={resetChat}
-                className="flex items-center gap-1.5 rounded-xl bg-brand-500/15 px-3.5 py-2 text-xs font-bold text-brand-300 ring-1 ring-brand-400/25"
-              >
-                <SquarePen className="h-3.5 w-3.5" />
-                {t.app.newChat}
-              </button>
+              <div className="flex items-center gap-1.5">
+                {isPro && (
+                  <Link
+                    href="/app/settings/memory"
+                    aria-label="ذاكرة برق"
+                    className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/5 text-amber-200"
+                  >
+                    <Brain className="h-4 w-4" />
+                  </Link>
+                )}
+                {isPro && msgs.some((m) => m.content) && (
+                  <button
+                    type="button"
+                    onClick={exportChat}
+                    aria-label={pro.exportChat}
+                    className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-300"
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={resetChat}
+                  className="flex items-center gap-1.5 rounded-xl bg-brand-500/15 px-3.5 py-2 text-xs font-bold text-brand-300 ring-1 ring-brand-400/25"
+                >
+                  <SquarePen className="h-3.5 w-3.5" />
+                  {t.app.newChat}
+                </button>
+              </div>
             </div>
 
             {empty ? (
@@ -863,10 +1007,13 @@ export function ChatPage() {
               </div>
             ) : (
               <div className="flex flex-col gap-5">
-                {msgs.map((m) => (
+                {msgs.map((m, i) => (
                   <MessageRow
                     key={m.id}
                     m={m}
+                    isLast={i === msgs.length - 1}
+                    onPreview={setPreview}
+                    onRegenerate={onRegen}
                     name={user?.displayName ?? null}
                     photo={user?.photoURL ?? null}
                     thinking={t.app.thinking}
@@ -930,7 +1077,7 @@ export function ChatPage() {
                 scrollToEnd(true);
               }}
               aria-label={t.app.jumpToEnd}
-              className="absolute inset-x-0 bottom-[9.5rem] z-10 mx-auto grid h-10 w-10 place-items-center rounded-full border border-aqua-300/20 bg-ink-800 text-slate-200 shadow-lg shadow-black/40"
+              className="absolute inset-x-0 bottom-[11rem] z-10 mx-auto grid h-10 w-10 place-items-center rounded-full border border-aqua-300/20 bg-ink-800 text-slate-200 shadow-lg shadow-black/40"
             >
               <ArrowDown className="h-5 w-5" />
             </motion.button>
@@ -938,7 +1085,7 @@ export function ChatPage() {
         </AnimatePresence>
 
         {/* composer */}
-        <div className="shrink-0 px-2.5 pb-0.5 pt-0 sm:px-6 sm:pb-2">
+        <div className="relative shrink-0 bg-gradient-to-t from-ink-950 via-ink-950/92 to-transparent px-2.5 pb-1 pt-3 sm:px-6 sm:pb-3">
           <form onSubmit={onSubmit} className="mx-auto w-full max-w-3xl">
             {proHint && !isPro && (
               <div className="mb-2 flex items-start gap-3 rounded-2xl border border-amber-300/25 bg-amber-400/10 p-3.5">
@@ -962,34 +1109,6 @@ export function ChatPage() {
                 </button>
               </div>
             )}
-            {files.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2">
-                {files.map((f) => (
-                  <span
-                    key={f.id}
-                    className="inline-flex max-w-[15rem] items-center gap-2 rounded-xl border border-white/10 bg-ink-800 py-1 pe-1 ps-1.5 text-xs font-semibold text-slate-200"
-                  >
-                    {f.preview ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={f.preview} alt="" className="h-8 w-8 rounded-md object-cover" />
-                    ) : (
-                      <span className="grid h-8 w-8 place-items-center rounded-md bg-white/8">
-                        <FileText className="h-4 w-4 text-brand-300" />
-                      </span>
-                    )}
-                    <span dir="ltr" className="truncate">{f.name}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeFile(f.id)}
-                      aria-label={pro.remove}
-                      className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-white"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
             {notice && (
               <p className="mb-2 px-2 text-xs font-bold text-rose-300">{notice}</p>
             )}
@@ -998,30 +1117,51 @@ export function ChatPage() {
               type="file"
               multiple
               hidden
-              accept="image/*,application/pdf,text/*,.md,.json,.js,.jsx,.ts,.tsx,.mjs,.py,.php,.java,.kt,.swift,.c,.h,.cpp,.cs,.go,.rs,.rb,.sh,.sql,.html,.css,.scss,.vue,.svelte,.yml,.yaml,.xml,.csv,.log,.toml,.ini"
+              accept="image/*,application/pdf,.zip,application/zip,text/*,.md,.json,.js,.jsx,.ts,.tsx,.mjs,.py,.php,.java,.kt,.swift,.c,.h,.cpp,.cs,.go,.rs,.rb,.sh,.sql,.html,.css,.scss,.vue,.svelte,.yml,.yaml,.xml,.csv,.log,.toml,.ini"
               onChange={(e) => {
                 const list = e.target.files;
                 if (list && list.length > 0) void addFiles(Array.from(list));
                 e.target.value = "";
               }}
             />
-            <div className="flex items-end gap-1.5 rounded-[1.75rem] border border-aqua-300/15 bg-ink-900/95 p-2 ps-2 shadow-[0_18px_50px_-24px_rgba(0,0,0,0.9)] transition focus-within:border-brand-400/60 focus-within:shadow-[0_0_0_4px_rgba(38,160,111,0.14),0_18px_50px_-24px_rgba(0,0,0,0.9)]">
-              <button
-                type="button"
-                onClick={() => (isPro ? fileRef.current?.click() : setProHint(true))}
-                aria-label={pro.attach}
-                title={pro.attach}
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-full text-slate-400 transition hover:bg-white/8 hover:text-brand-300 active:scale-90"
-              >
-                <Paperclip className="h-5 w-5" />
-              </button>
+
+            <div className="rounded-[1.75rem] border border-white/12 bg-ink-900/95 shadow-[0_20px_60px_-26px_rgba(0,0,0,0.95)] backdrop-blur transition focus-within:border-white/40 focus-within:shadow-[0_0_0_4px_rgba(255,255,255,0.06),0_20px_60px_-26px_rgba(0,0,0,0.95)]">
+              {files.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-3 pt-3">
+                  {files.map((f) => (
+                    <span
+                      key={f.id}
+                      className="inline-flex max-w-[15rem] items-center gap-2 rounded-xl border border-white/10 bg-ink-800 py-1 pe-1 ps-1.5 text-xs font-semibold text-slate-200"
+                    >
+                      {f.preview ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={f.preview} alt="" className="h-8 w-8 rounded-md object-cover" />
+                      ) : (
+                        <span className="grid h-8 w-8 place-items-center rounded-md bg-white/8">
+                          <FileText className="h-4 w-4 text-brand-300" />
+                        </span>
+                      )}
+                      <span dir="ltr" className="truncate">{f.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeFile(f.id)}
+                        aria-label={pro.remove}
+                        className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-slate-400 hover:bg-white/10 hover:text-white"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
               <textarea
                 ref={taRef}
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
                   e.target.style.height = "auto";
-                  e.target.style.height = `${Math.min(e.target.scrollHeight, 170)}px`;
+                  e.target.style.height = `${Math.min(e.target.scrollHeight, 190)}px`;
                 }}
                 onKeyDown={(e) => {
                   if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
@@ -1042,111 +1182,124 @@ export function ChatPage() {
                 autoComplete="off"
                 placeholder={t.app.inputPlaceholder}
                 aria-label={t.app.inputPlaceholder}
-                className="max-h-[170px] min-h-[44px] w-full flex-1 resize-none bg-transparent py-2.5 text-[16px] leading-relaxed text-slate-100 outline-none placeholder:text-slate-500"
+                className="block max-h-[190px] min-h-[54px] w-full resize-none bg-transparent px-4.5 pb-1 pt-4 text-[16px] leading-relaxed text-slate-50 outline-none placeholder:text-slate-500"
               />
 
-              {voiceOk && !streaming && (
+              {/* tools row: attach · voice · deep · model switch ........ send */}
+              <div className="flex items-center gap-1 px-2 pb-2 pt-1">
                 <button
                   type="button"
-                  onClick={toggleVoice}
-                  aria-label={listening ? pro.voiceStop : pro.voice}
-                  title={listening ? pro.voiceStop : pro.voice}
-                  className={cn(
-                    "grid h-11 w-11 shrink-0 place-items-center rounded-full transition active:scale-90",
-                    listening
-                      ? "animate-pulse bg-rose-500/25 text-rose-200"
-                      : "text-slate-400 hover:bg-white/8 hover:text-brand-300"
-                  )}
+                  onClick={() => (isPro ? fileRef.current?.click() : setProHint(true))}
+                  aria-label={pro.attach}
+                  title={pro.attach}
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-slate-400 transition hover:bg-white/8 hover:text-brand-300 active:scale-90"
                 >
-                  <Mic className="h-5 w-5" />
+                  <Paperclip className="h-5 w-5" />
                 </button>
-              )}
-              {streaming ? (
-                <button
-                  type="button"
-                  onClick={stop}
-                  aria-label={t.app.stop}
-                  title={t.app.stop}
-                  className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-aqua-300 text-ink-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] transition active:scale-90"
+                {voiceOk && !streaming && (
+                  <button
+                    type="button"
+                    onClick={toggleVoice}
+                    aria-label={listening ? pro.voiceStop : pro.voice}
+                    title={listening ? pro.voiceStop : pro.voice}
+                    className={cn(
+                      "grid h-10 w-10 shrink-0 place-items-center rounded-full transition active:scale-90",
+                      listening
+                        ? "animate-pulse bg-rose-500/25 text-rose-200"
+                        : "text-slate-400 hover:bg-white/8 hover:text-brand-300"
+                    )}
+                  >
+                    <Mic className="h-5 w-5" />
+                  </button>
+                )}
+                {isPro && tier === "v5" && (
+                  <button
+                    type="button"
+                    onClick={() => setDeep((v) => !v)}
+                    aria-pressed={deep}
+                    aria-label={pro.deepOn}
+                    title={pro.deepHint}
+                    className={cn(
+                      "grid h-10 w-10 shrink-0 place-items-center rounded-full transition active:scale-90",
+                      deep
+                        ? "bg-amber-300/20 text-amber-200 ring-1 ring-amber-300/50"
+                        : "text-slate-400 hover:bg-white/8 hover:text-amber-200"
+                    )}
+                  >
+                    <Brain className="h-5 w-5" />
+                  </button>
+                )}
+
+                {/* model switch: برق 5 / برق 6 live inside the message box */}
+                <div
+                  role="radiogroup"
+                  aria-label="النموذج"
+                  className="ms-1 flex min-w-0 items-center rounded-full border border-white/10 bg-black/30 p-0.5"
                 >
-                  <Square className="h-4 w-4 fill-current" />
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  disabled={!canSend}
-                  aria-label={t.app.send}
-                  title={t.app.send}
-                  className={cn(
-                    "grid h-11 w-11 shrink-0 place-items-center rounded-full transition duration-150 active:scale-90",
-                    canSend
-                      ? "bg-gradient-to-b from-[#22a977] to-brand-600 text-[#faf4e6] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_8px_20px_-8px_rgba(38,160,111,0.9)] hover:brightness-110"
-                      : "bg-white/[0.07] text-slate-500"
-                  )}
-                >
-                  <ArrowUp className="h-5 w-5" strokeWidth={2.4} />
-                </button>
-              )}
+                  {(isPro
+                    ? ([["v5", "برق 5"], ["v6", "برق 6"]] as const)
+                    : ([["v4", "برق 4"], ["v5", "برق 5"], ["v6", "برق 6"]] as const)
+                  ).map(([id, label]) => {
+                    const on = (isPro ? tier : "v4") === id;
+                    const locked = !isPro && id !== "v4";
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        onClick={() => pickTier(id)}
+                        className={cn(
+                          "inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-full px-2.5 text-[12px] font-black transition active:scale-95",
+                          on
+                            ? id === "v6"
+                              ? "bg-white text-ink-950"
+                              : "bg-zinc-700 text-white"
+                            : "text-slate-400 hover:text-slate-100"
+                        )}
+                      >
+                        {id === "v6" && !locked ? (
+                          <Sparkles className="h-3.5 w-3.5" />
+                        ) : locked ? (
+                          <Lock className="h-3 w-3" />
+                        ) : null}
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <span className="flex-1" />
+
+                {streaming ? (
+                  <button
+                    type="button"
+                    onClick={stop}
+                    aria-label={t.app.stop}
+                    title={t.app.stop}
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-aqua-300 text-ink-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] transition active:scale-90"
+                  >
+                    <Square className="h-4 w-4 fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!canSend}
+                    aria-label={t.app.send}
+                    title={t.app.send}
+                    className={cn(
+                      "grid h-11 w-11 shrink-0 place-items-center rounded-full transition duration-150 active:scale-90",
+                      canSend
+                        ? "bg-white text-ink-950 hover:bg-zinc-200"
+                        : "bg-white/[0.07] text-slate-500"
+                    )}
+                  >
+                    <ArrowUp className="h-5 w-5" strokeWidth={2.6} />
+                  </button>
+                )}
+              </div>
             </div>
           </form>
-          <div className="mx-auto mb-1.5 mt-1 flex max-w-3xl items-center gap-1 px-1.5" role="radiogroup" aria-label="النموذج">
-            {([["v4", "برق 4", false], ["v5", "برق 5 Pro", true], ["v6", "برق 6 Pro", true]] as const).map(([id, label, pr]) => {
-              const on = (isPro ? tier : "v4") === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  role="radio"
-                  aria-checked={on}
-                  onClick={() => pickTier(id)}
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-black transition",
-                    on
-                      ? id === "v6"
-                        ? "border-amber-300/70 bg-gradient-to-l from-amber-300/25 to-brand-400/25 text-amber-100 shadow-[0_0_18px_-4px_rgba(227,176,75,.6)]"
-                        : "border-brand-400/60 bg-brand-500/20 text-white"
-                      : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/25"
-                  )}
-                >
-                  {id === "v6" ? <Sparkles className="h-3 w-3" /> : pr && !isPro ? <Lock className="h-3 w-3" /> : null}
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-          {isPro && (
-            <div className="mx-auto mt-1 flex max-w-3xl items-center gap-1.5 px-1.5">
-              <button
-                type="button"
-                onClick={() => setDeep((v) => !v)}
-                aria-pressed={deep}
-                title={pro.deepHint}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10.5px] font-bold transition",
-                  deep
-                    ? "border-amber-300/60 bg-amber-300/15 text-amber-100"
-                    : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/25"
-                )}
-              >
-                <Brain className="h-3.5 w-3.5" />
-                {pro.deepOn}
-              </button>
-              {msgs.some((m) => m.content) && (
-                <button
-                  type="button"
-                  onClick={exportChat}
-                  className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10.5px] font-bold text-slate-400 transition hover:border-white/25"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  {pro.exportChat}
-                </button>
-              )}
-              <span className="ms-auto inline-flex items-center gap-1 text-[10.5px] font-bold text-amber-200/80">
-                <Zap className="h-3.5 w-3.5" />
-                {pro.fast}
-              </span>
-            </div>
-          )}
           {profile && profile.plan !== "pro" && (
             <div className="mx-auto mt-1 flex max-w-3xl items-center gap-2.5 px-2">
               {(
@@ -1182,6 +1335,8 @@ export function ChatPage() {
           </p>
         </div>
       </div>
+
+      {preview && <FullPreview html={preview} onClose={() => setPreview(null)} />}
     </div>
   );
 }

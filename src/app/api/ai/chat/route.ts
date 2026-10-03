@@ -7,14 +7,16 @@ import {
   ensembleStream,
   isBuildRequest,
   streamToResponse,
+  withAutoContinue,
   GeminiError,
   type Attachment,
   type ChatTurn,
 } from "@/lib/gemini";
-import { CHAT_SYSTEM, CHAT_SYSTEM_PRO, CHAT_SYSTEM_V6, BUILD_SYSTEM_PRO } from "@/lib/prompts";
+import { CHAT_SYSTEM, CHAT_SYSTEM_PRO, CHAT_SYSTEM_V6, BUILD_SYSTEM_PRO, QUALITY_CONTRACT } from "@/lib/prompts";
 import { db } from "@/db";
-import { conversations, messages } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { aiMemories, conversations, messages } from "@/db/schema";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { getProfile } from "@/lib/usage";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -22,9 +24,80 @@ export const maxDuration = 300;
 const MAX_MSGS = 24;
 const MAX_LEN = 6000;
 /** Pro: room for pasted code / text files and a longer memory of the chat. */
-const MAX_MSGS_PRO = 40;
-const MAX_LEN_PRO = 30000;
-const MAX_LEN_PRO_HISTORY = 12000;
+const MAX_MSGS_PRO = 60;
+const MAX_LEN_PRO = 60000;
+/** the most recent code answer is kept (almost) whole so edits start from the real latest version */
+const MAX_LEN_LATEST_CODE = 90000;
+const MAX_LEN_PRO_HISTORY = 10000;
+/** total characters of conversation memory sent to the model (Pro) */
+const HISTORY_BUDGET = 260_000;
+/** assistant turns are stored whole in the browser: allow big builds to come back */
+const MAX_LEN_MODEL_IN = 160_000;
+
+/** Keeps the newest turns that fit the budget; the latest code answer stays complete. */
+function fitHistory(turns: ChatTurn[]): ChatTurn[] {
+  let budget = HISTORY_BUDGET;
+  let latestCodeKept = false;
+  const out: ChatTurn[] = [];
+  for (let i = turns.length - 1; i >= 0 && out.length < MAX_MSGS_PRO; i--) {
+    const t = turns[i];
+    const isLast = i === turns.length - 1;
+    const hasCode = t.role === "model" && t.text.includes("```");
+    let cap = isLast ? MAX_LEN_PRO : MAX_LEN_PRO_HISTORY;
+    if (hasCode && !latestCodeKept) {
+      cap = MAX_LEN_LATEST_CODE;
+      latestCodeKept = true;
+    }
+    const text = t.text.length > cap ? t.text.slice(0, cap) : t.text;
+    if (out.length > 0 && budget - text.length < 0) break;
+    budget -= text.length;
+    out.unshift({ ...t, text });
+  }
+  while (out.length > 0 && out[0].role === "model") out.shift();
+  return out;
+}
+
+/** "Remember that …" / "تذكر أن …" → saved to long-term memory. */
+const REMEMBER_RE = /(?:^|[\s.!؟?،,])(?:تذكّر|تذكر|خليك تتذكر|remember(?: that)?|souviens[- ]toi)(?:\s+|:)(.{6,300})/i;
+
+async function loadMemoryBlock(uid: string): Promise<string> {
+  try {
+    const rows = await db
+      .select({ content: aiMemories.content })
+      .from(aiMemories)
+      .where(eq(aiMemories.userId, uid))
+      .orderBy(desc(aiMemories.createdAt))
+      .limit(40);
+    if (rows.length === 0) return "";
+    return (
+      "\n\nUSER LONG-TERM MEMORY (facts the user wants you to keep in mind in every chat — use them silently, never recite the list):\n" +
+      rows.map((r) => `- ${r.content}`).join("\n")
+    );
+  } catch {
+    return "";
+  }
+}
+
+async function rememberFrom(uid: string, text: string): Promise<void> {
+  const m = REMEMBER_RE.exec(text);
+  if (!m) return;
+  const fact = m[1].replace(/\s+/g, " ").trim().slice(0, 300);
+  if (fact.length < 6) return;
+  try {
+    const n = await db.select({ n: sql<number>`count(*)::int` }).from(aiMemories).where(eq(aiMemories.userId, uid));
+    if ((n[0]?.n ?? 0) >= 60) return;
+    await db.insert(aiMemories).values({ userId: uid, content: fact, source: "auto" });
+  } catch {
+    /* memory is best-effort */
+  }
+}
+
+const emptyStream = () =>
+  new ReadableStream<string>({
+    start(c) {
+      c.close();
+    },
+  });
 
 /** Pro attachments: images + PDF, validated here (never trust the client). */
 const ALLOWED_MIME = new Set([
@@ -39,8 +112,8 @@ const MAX_B64_TOTAL = 4_000_000; // ≈3 MB of binary — fits Vercel's 4.5 MB b
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 
 const MAX_TEXT_FILES = 4;
-const MAX_TEXT_FILE = 60_000;
-const MAX_TEXT_TOTAL = 120_000;
+const MAX_TEXT_FILE = 150_000;
+const MAX_TEXT_TOTAL = 320_000;
 type TextFile = { name: string; text: string };
 
 function parseTextFiles(raw: unknown): TextFile[] | "BAD" {
@@ -96,6 +169,8 @@ export async function POST(req: Request) {
     textFiles?: unknown;
     deep?: boolean;
     v6?: boolean;
+    /** Pro: the answer stopped inside a code block — finish it (no credit used) */
+    continueFrom?: string;
   };
   try {
     body = await req.json();
@@ -112,11 +187,49 @@ export async function POST(req: Request) {
     if (!m || typeof m.content !== "string" || !m.content.trim()) continue;
     turns.push({
       role: m.role === "assistant" || m.role === "model" ? "model" : "user",
-      text: m.content.slice(0, MAX_LEN_PRO),
+      text: m.content.slice(0, m.role === "assistant" || m.role === "model" ? MAX_LEN_MODEL_IN : MAX_LEN_PRO),
     });
   }
   if (turns.length === 0 || turns[turns.length - 1].role !== "user") {
     return json(400, { code: "BAD_MESSAGES" });
+  }
+
+  /* ---------- continuation of a cut-off answer: free of charge, Pro only ---------- */
+  if (typeof body.continueFrom === "string" && body.continueFrom.length > 200) {
+    if (!rateLimit(`aic:${user.uid}`, 12, 60_000).ok) return json(429, { code: "RATE" });
+    let proNow = false;
+    try {
+      proNow = (await getProfile(user.uid))?.plan === "pro";
+    } catch {
+      proNow = false;
+    }
+    if (!proNow) return json(403, { code: "PRO_ONLY" });
+    const seed = body.continueFrom.slice(0, 320_000);
+    const convId = typeof body.conversationId === "string" ? body.conversationId : null;
+    const system =
+      (body.v6 === true ? CHAT_SYSTEM_V6 : CHAT_SYSTEM_PRO) + QUALITY_CONTRACT.split("\n6.")[0];
+    const lastTurn = turns[turns.length - 1];
+    const stream = withAutoContinue(emptyStream(), {
+      system,
+      messages: [lastTurn],
+      seed,
+      rounds: 6,
+      onDone: async (full) => {
+        const tail = full.slice(seed.length);
+        if (!convId || !tail.trim()) return;
+        await db
+          .execute(
+            sql`update barq.messages set content = content || ${tail}
+                where id = (
+                  select m.id from barq.messages m
+                  join barq.conversations c on c.id = m.conversation_id
+                  where m.conversation_id = ${convId} and m.role = 'assistant' and c.user_id = ${user.uid}
+                  order by m.created_at desc limit 1)`
+          )
+          .catch(() => undefined);
+      },
+    });
+    return streamToResponse(stream, { "x-conversation-id": convId ?? "" });
   }
 
   const parsed = parseAttachments(body.attachments);
@@ -160,10 +273,7 @@ export async function POST(req: Request) {
 
   // apply the plan's limits (free: the original 24 messages × 6000 chars)
   const capped = isPro
-    ? turns.map((t, i) => ({
-        ...t,
-        text: t.text.slice(0, i === turns.length - 1 ? MAX_LEN_PRO : MAX_LEN_PRO_HISTORY),
-      }))
+    ? fitHistory(turns)
     : turns.slice(-MAX_MSGS).map((t) => ({ ...t, text: t.text.slice(0, MAX_LEN) }));
   if (capped.length === 0 || capped[capped.length - 1].role !== "user") {
     if (credit.tracked) await refundCredit(user.uid);
@@ -171,6 +281,8 @@ export async function POST(req: Request) {
   }
 
   const lastUser = capped[capped.length - 1].text;
+  const memBlock = isPro && credit.tracked ? await loadMemoryBlock(user.uid) : "";
+  if (isPro && credit.tracked) void rememberFrom(user.uid, lastUser);
   const fileNames = [...parsed.names, ...textFiles.map((f) => f.name)];
   const savedUser =
     fileNames.length > 0 ? `${lastUser}\n\n📎 ${fileNames.join(" · ")}` : lastUser;
@@ -245,7 +357,7 @@ export async function POST(req: Request) {
     const build = isPro && isBuildRequest(lastUser);
     const stream = build
       ? ensembleStream({
-          system: BUILD_SYSTEM_PRO,
+          system: BUILD_SYSTEM_PRO + QUALITY_CONTRACT.split("\n6.")[0] + memBlock,
           epic: true,
           maxTokens: 64000,
           messages: capped,
@@ -259,18 +371,27 @@ export async function POST(req: Request) {
             if (credit.tracked) await refundCredit(user.uid);
           },
         })
-      : await streamGemini({
-          system: isPro ? (body.v6 === true ? CHAT_SYSTEM_V6 : CHAT_SYSTEM_PRO) : CHAT_SYSTEM,
-          messages: capped,
-          tier: isPro ? "pro" : "free",
-          mode: isPro && body.deep === true ? "quality" : "speed",
-          maxTokens: isPro ? (body.v6 === true ? 32000 : 16000) : undefined,
-          attachments: parsed.files,
-          onModel: (m) => {
-            usedModel = m;
-          },
-          onDone: saveAnswer,
-        });
+      : await (async () => {
+          const system = isPro
+            ? (body.v6 === true ? CHAT_SYSTEM_V6 : CHAT_SYSTEM_PRO) + QUALITY_CONTRACT + memBlock
+            : CHAT_SYSTEM;
+          const base = await streamGemini({
+            system,
+            messages: capped,
+            tier: isPro ? "pro" : "free",
+            mode: isPro && body.deep === true ? "quality" : "speed",
+            maxTokens: isPro ? (body.v6 === true ? 32000 : 20000) : undefined,
+            attachments: parsed.files,
+            onModel: (m) => {
+              usedModel = m;
+            },
+            // Pro answers go through the never-stop guard, which saves the final text itself
+            onDone: isPro ? undefined : saveAnswer,
+          });
+          return isPro
+            ? withAutoContinue(base, { system, messages: capped, rounds: 5, onDone: saveAnswer })
+            : base;
+        })();
     const fixedConvId = await persistP;
 
     return streamToResponse(stream, {

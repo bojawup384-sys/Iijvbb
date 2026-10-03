@@ -51,7 +51,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#08100d",
+  themeColor: "#050505",
+  colorScheme: "dark",
   width: "device-width",
   initialScale: 1,
   minimumScale: 1,
@@ -67,6 +68,11 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
       <body className={`${plex.variable} antialiased`}>
+        <div className="aurora" aria-hidden>
+          <i />
+          <i />
+          <i />
+        </div>
         <I18nProvider>
           <AuthProvider>{children}</AuthProvider>
         </I18nProvider>

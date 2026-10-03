@@ -169,7 +169,7 @@ const ar = {
       priceYear: "9 900",
       features: [
         "محاولات غير محدودة",
-        "أحدث نماذج Gemini + سرعة فائقة",
+        "أحدث النماذج + سرعة فائقة",
         "أدوات تحليل الكود وصانع الألعاب",
         "رفع الصور وملفات PDF والكود",
         "تفكير عميق وإدخال صوتي وتصدير المحادثات",
@@ -501,7 +501,7 @@ const fr: Dict = {
       priceYear: "9 900",
       features: [
         "Essais illimités",
-        "Derniers modèles Gemini + vitesse ultra",
+        "Derniers modèles + vitesse ultra",
         "Outils d'analyse de code et créateur de jeux",
         "Images, PDF et fichiers de code",
         "Réflexion profonde, saisie vocale, export",
@@ -831,7 +831,7 @@ const en: Dict = {
       priceYear: "9,900",
       features: [
         "Unlimited tries",
-        "Newest Gemini models + ultra speed",
+        "Newest models + ultra speed",
         "Code analysis tools and game builder",
         "Upload images, PDFs and code files",
         "Deep thinking, voice input, chat export",
