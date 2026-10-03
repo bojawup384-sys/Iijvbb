@@ -471,12 +471,12 @@ function compatRequest(
         system,
         stream: o.stream,
         temperature: Math.min(o.temperature, 1),
-        max_tokens: Math.min(o.maxTokens, 32000),
+        max_tokens: Math.min(o.maxTokens, 64000),
         messages: toAnthropicMessages(messages, o.atts),
       }),
     };
   }
-  const cap = p.name === "groq" ? 8000 : 16000;
+  const cap = p.name === "groq" ? 8000 : 32000;
   return {
     headers: {
       "Content-Type": "application/json",
@@ -644,6 +644,8 @@ export async function streamGemini(opts: {
   tier?: Tier;
   mode?: Mode;
   maxTokens?: number;
+  /** Pro "epic" builds: 3000+ line deliverables (bigger limits, multi-round continuation) */
+  epic?: boolean;
   /** images / PDFs attached to the LAST user turn (ignored for free tier) */
   attachments?: Attachment[];
   /** keep the strong model but skip long "thinking" (lower first-token latency) */
@@ -819,6 +821,10 @@ export function isBuildRequest(text: string): boolean {
   const codeWrite = /(اكتب|write|اعطني|أعطني|عطيني).{0,40}(كود|code|script|سكريبت|سكربت|برنامج|program)/i;
   return (noun.test(t) && verb.test(t)) || codeWrite.test(t);
 }
+
+const EPIC_RULES = `
+
+EPIC MODE (Barq 6 Pro): the final deliverable MUST be a large, complete product of AT LEAST 3000 lines of real, working code (not padding, not comments, not blank lines). Merge the best ideas of every draft, then EXPAND: more modules, more content, more polish, more features. Never summarise, never abbreviate, never write "rest of code". Write every line in full until the file is finished.`;
 
 const DRAFT_RULES = `
 
@@ -1034,7 +1040,7 @@ async function streamLead(
 ): Promise<{ stream: ReadableStream<string>; model: string }> {
   const key = getGeminiKey() ?? "";
   const providers = fallbackProviders();
-  const maxTokens = Math.max(opts.maxTokens ?? 0, 32_000);
+  const maxTokens = Math.max(opts.maxTokens ?? 0, opts.epic ? 64_000 : 32_000);
   let lastErr: unknown = null;
   for (const name of leadOrder()) {
     try {
@@ -1106,7 +1112,7 @@ export function ensembleStream(
           `> ⚡ فريق برق يشتغل: **${names.join(" + ")}** — كل محرّك يبني نسخته ثم يندمجون في نتيجة واحدة أقوى…\n\n`
         );
 
-        const MS = Number(process.env.BARQ_DRAFT_MS) > 5000 ? Number(process.env.BARQ_DRAFT_MS) : 55_000;
+        const MS = Number(process.env.BARQ_DRAFT_MS) > 5000 ? Number(process.env.BARQ_DRAFT_MS) : opts.epic ? 40_000 : 55_000;
         const atts = opts.attachments ?? [];
         const draftSys = opts.system + DRAFT_RULES;
         const stop = new AbortController();
@@ -1134,9 +1140,10 @@ export function ensembleStream(
             },
           ];
           const web = drafts.some((d) => /```html/i.test(d.text));
-          system = opts.system + (web ? SYNTH_RULES_WEB : SYNTH_RULES);
+          system = opts.system + (web ? SYNTH_RULES_WEB : SYNTH_RULES) + (opts.epic ? EPIC_RULES : "");
         }
 
+        if (opts.epic && drafts.length === 0) system = opts.system + EPIC_RULES;
         const lead = await streamLead({ ...opts, system, messages }, atts);
         let acc = "";
         reader = lead.stream.getReader();
@@ -1148,7 +1155,7 @@ export function ensembleStream(
         }
 
         // Stage 3 — cut off by the token limit? continue once and close the file.
-        if (!cancelled && acc.length > 500 && looksCut(acc)) {
+        for (let round = 0; round < (opts.epic ? 4 : 1) && !cancelled && acc.length > 500 && looksCut(acc); round++) {
           const origLast = opts.messages[opts.messages.length - 1];
           const cont = await streamLead(
             {

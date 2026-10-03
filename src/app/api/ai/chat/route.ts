@@ -11,7 +11,7 @@ import {
   type Attachment,
   type ChatTurn,
 } from "@/lib/gemini";
-import { CHAT_SYSTEM, CHAT_SYSTEM_PRO, BUILD_SYSTEM_PRO } from "@/lib/prompts";
+import { CHAT_SYSTEM, CHAT_SYSTEM_PRO, CHAT_SYSTEM_V6, BUILD_SYSTEM_PRO } from "@/lib/prompts";
 import { db } from "@/db";
 import { conversations, messages } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -245,6 +245,8 @@ export async function POST(req: Request) {
     const stream = build
       ? ensembleStream({
           system: BUILD_SYSTEM_PRO,
+          epic: true,
+          maxTokens: 64000,
           messages: capped,
           attachments: parsed.files,
           temperature: 0.7,
@@ -257,10 +259,11 @@ export async function POST(req: Request) {
           },
         })
       : await streamGemini({
-          system: isPro ? CHAT_SYSTEM_PRO : CHAT_SYSTEM,
+          system: isPro ? (body.v6 === true ? CHAT_SYSTEM_V6 : CHAT_SYSTEM_PRO) : CHAT_SYSTEM,
           messages: capped,
           tier: isPro ? "pro" : "free",
           mode: isPro && body.deep === true ? "quality" : "speed",
+          maxTokens: isPro ? (body.v6 === true ? 32000 : 16000) : undefined,
           attachments: parsed.files,
           onModel: (m) => {
             usedModel = m;

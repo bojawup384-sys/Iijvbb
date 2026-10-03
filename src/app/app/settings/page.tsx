@@ -10,16 +10,20 @@ import {
   Mail,
   User as UserIcon,
   Coins,
+  Bell,
+  HardDrive,
+  ShieldCheck,
 } from "lucide-react";
+import { Row } from "@/components/settings-ui";
 import { motion } from "framer-motion";
 import { useAuth } from "@/lib/auth-context";
-import { LOCALES, LOCALE_NAMES, useI18n } from "@/lib/i18n";
+import { LOCALE_NAMES, useI18n } from "@/lib/i18n";
 import { useCredits, UserAvatar } from "@/components/app/app-shell";
 import { InstallButton } from "@/components/pwa";
 import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
-  const { t, locale, setLocale } = useI18n();
+  const { t, locale } = useI18n();
   const { user, signOut } = useAuth();
   const { profile } = useCredits();
   const router = useRouter();
@@ -86,36 +90,13 @@ export default function SettingsPage() {
           </div>
         </motion.section>
 
-        {/* language */}
-        <motion.section
-          initial={{ opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="glass rounded-3xl p-6"
-        >
-          <h2 className="mb-5 flex items-center gap-2 text-sm font-black text-slate-300">
-            <Globe className="h-4.5 w-4.5 text-aqua-300" />
-            {t.common.language}
-          </h2>
-          <div className="grid grid-cols-3 gap-3">
-            {LOCALES.map((l) => (
-              <button
-                key={l}
-                type="button"
-                onClick={() => setLocale(l)}
-                className={cn(
-                  "rounded-2xl border py-4 text-sm font-black transition",
-                  locale === l
-                    ? "border-brand-400/60 bg-brand-500/20 text-white shadow-lg"
-                    : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/25 hover:text-white"
-                )}
-                dir={l === "ar" ? "rtl" : "ltr"}
-              >
-                {LOCALE_NAMES[l]}
-              </button>
-            ))}
-          </div>
-        </motion.section>
+        {/* sections — each opens its own page */}
+        <section className="space-y-3">
+          <Row icon={Globe} title={t.common.language} desc={LOCALE_NAMES[locale]} href="/app/settings/language" />
+          <Row icon={ShieldCheck} title="الخصوصية" desc="حذف المحادثات والسياسات" href="/app/settings/privacy" />
+          <Row icon={Bell} title="الإشعارات" desc="تذكيرات وعروض" href="/app/settings/notifications" />
+          <Row icon={HardDrive} title="التخزين" desc="مسح الذاكرة المؤقتة" href="/app/settings/storage" />
+        </section>
 
         {/* plan */}
         <motion.section

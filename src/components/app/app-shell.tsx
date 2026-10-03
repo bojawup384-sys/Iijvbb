@@ -22,6 +22,7 @@ import {
   Info,
   SquarePen,
   Coins,
+  Wand2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/lib/i18n";
@@ -67,17 +68,17 @@ export function useCredits() {
 /* Shell                                                               */
 /* ------------------------------------------------------------------ */
 
-/** "v5 PRO" pill shown next to the logo for Pro accounts */
+/** "v6 PRO" pill shown next to the logo for Pro accounts */
 export function ProBadge({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-md bg-gradient-to-b from-[#f0cf86] to-[#d9a94f] px-1.5 py-0.5 text-[10px] font-black leading-none text-ink-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]",
+        "pro-shine inline-flex items-center gap-1 rounded-md bg-gradient-to-b from-[#f0cf86] to-[#d9a94f] px-1.5 py-0.5 text-[10px] font-black leading-none text-ink-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]",
         className
       )}
     >
       <Crown className="h-3 w-3" />
-      v5 PRO
+      v6 PRO
     </span>
   );
 }
@@ -140,6 +141,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const nav = [
     { href: "/app", label: t.app.chat, icon: MessagesSquare, exact: true },
     { href: "/app/tools", label: t.app.tools, icon: LayoutGrid, exact: false },
+    { href: "/app/studio", label: "الاستوديو", icon: Wand2, exact: true },
     { href: "/app/history", label: t.app.history, icon: History, exact: true },
     { href: "/app/upgrade", label: t.app.upgrade, icon: Crown, exact: true },
     { href: "/app/settings", label: t.app.settings, icon: Settings, exact: true },

@@ -1,5 +1,12 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, type Auth } from "firebase/auth";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  setPersistence,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  type Auth,
+} from "firebase/auth";
 
 import { firebaseConfig } from "@/lib/firebase-config";
 
@@ -14,6 +21,13 @@ if (getApps().length === 0) {
   app = getApp();
 }
 authInstance = getAuth(app);
+
+// Keep the user signed in on this device until they explicitly sign out.
+if (typeof window !== "undefined") {
+  setPersistence(authInstance, indexedDBLocalPersistence).catch(() =>
+    setPersistence(authInstance, browserLocalPersistence).catch(() => undefined)
+  );
+}
 
 // Optional analytics — browser only, never crashes SSR or unsupported envs.
 if (typeof window !== "undefined") {

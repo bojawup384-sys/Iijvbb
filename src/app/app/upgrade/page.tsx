@@ -170,7 +170,7 @@ function UpgradeInner() {
         )}
       </div>
 
-      {/* what v5 Pro adds */}
+      {/* what v6 Pro adds */}
       <div className="glass-deep mb-8 rounded-3xl p-6">
         <h2 className="mb-4 flex items-center gap-2 text-sm font-black text-amber-200">
           <Crown className="h-4 w-4" />

@@ -16,6 +16,10 @@ import {
   ShieldCheck,
   FlaskConical,
   Gamepad2,
+  Palette,
+  Smartphone,
+  LayoutTemplate,
+  PenTool,
   type LucideIcon,
 } from "lucide-react";
 import type { Locale } from "@/lib/i18n";
@@ -41,7 +45,7 @@ export type ToolDef = {
   name: L;
   desc: L;
   fields: ToolField[];
-  /** Pro-only tool (v5) — gated on the server too */
+  /** Pro-only tool (v6) — gated on the server too */
   pro?: boolean;
   /** "game" results get a live preview + download */
   kind?: "text" | "game";
@@ -495,7 +499,7 @@ export const TOOLS: ToolDef[] = [
 ];
 
 
-/** v5 Pro tools — code analysis + game creation. Not listed on public SEO pages. */
+/** v6 Pro tools — code analysis + game creation. Not listed on public SEO pages. */
 export const PRO_TOOLS: ToolDef[] = [
   {
     id: "code-review",
@@ -715,6 +719,130 @@ export const PRO_TOOLS: ToolDef[] = [
         rows: 3,
         label: { ar: "ميزات إضافية (اختياري)", fr: "Options (optionnel)", en: "Extra features (optional)" },
         placeholder: { ar: "مثال: مستويات، أعداء أقوياء، نقاط خاصة", fr: "Ex : niveaux, boss, bonus", en: "E.g. levels, bosses, power-ups" },
+      },
+    ],
+  },
+  {
+    id: "wallpaper-designer",
+    icon: Palette,
+    accent: "violet",
+    pro: true,
+    kind: "game",
+    name: { ar: "مصمم الخلفيات", fr: "Créateur de fonds d'écran", en: "Wallpaper designer" },
+    desc: { ar: "خلفيات متحركة فخمة لهاتفك وحاسوبك", fr: "Fonds d'écran animés haut de gamme", en: "Premium animated wallpapers" },
+    fields: [
+      {
+        key: "idea",
+        type: "textarea",
+        required: true,
+        rows: 3,
+        label: { ar: "وصف الفكرة", fr: "Description", en: "Your idea" },
+        placeholder: { ar: "مثال: سماء ليلية فوق الصحراء مع نجوم تتلألأ", fr: "Décrivez votre idée", en: "Describe what you want" },
+      },
+      {
+        key: "style",
+        type: "text",
+        label: { ar: "الأسلوب والمزاج (اختياري)", fr: "Style (optionnel)", en: "Style & mood (optional)" },
+        placeholder: { ar: "مثال: هادئ، سينمائي، حالم", fr: "Ex : minimal, sombre, luxe", en: "E.g. minimal, dark, luxury" },
+      },
+      {
+        key: "colors",
+        type: "text",
+        label: { ar: "الألوان (اختياري)", fr: "Couleurs (optionnel)", en: "Colors (optional)" },
+        placeholder: { ar: "مثال: أخضر زمردي وذهبي", fr: "Ex : vert émeraude et or", en: "E.g. emerald and gold" },
+      },
+    ],
+  },
+  {
+    id: "ui-designer",
+    icon: Smartphone,
+    accent: "cyan",
+    pro: true,
+    kind: "game",
+    name: { ar: "مصمم الواجهات", fr: "Designer d'interfaces", en: "UI designer" },
+    desc: { ar: "واجهات تطبيقات عصرية جاهزة للمعاينة", fr: "Écrans d'app modernes, prévisualisés", en: "Modern app screens with live preview" },
+    fields: [
+      {
+        key: "idea",
+        type: "textarea",
+        required: true,
+        rows: 3,
+        label: { ar: "وصف الفكرة", fr: "Description", en: "Your idea" },
+        placeholder: { ar: "مثال: شاشة تطبيق توصيل طعام في الجزائر", fr: "Décrivez votre idée", en: "Describe what you want" },
+      },
+      {
+        key: "style",
+        type: "text",
+        label: { ar: "الأسلوب والمزاج (اختياري)", fr: "Style (optionnel)", en: "Style & mood (optional)" },
+        placeholder: { ar: "مثال: عصري، زجاجي، دافئ", fr: "Ex : minimal, sombre, luxe", en: "E.g. minimal, dark, luxury" },
+      },
+      {
+        key: "colors",
+        type: "text",
+        label: { ar: "الألوان (اختياري)", fr: "Couleurs (optionnel)", en: "Colors (optional)" },
+        placeholder: { ar: "مثال: أخضر زمردي وذهبي", fr: "Ex : vert émeraude et or", en: "E.g. emerald and gold" },
+      },
+    ],
+  },
+  {
+    id: "landing-builder",
+    icon: LayoutTemplate,
+    accent: "amber",
+    pro: true,
+    kind: "game",
+    name: { ar: "صانع صفحات الهبوط", fr: "Créateur de landing pages", en: "Landing page builder" },
+    desc: { ar: "صفحة هبوط كاملة تبيع منتجك", fr: "Une landing page complète qui vend", en: "A full landing page that sells" },
+    fields: [
+      {
+        key: "idea",
+        type: "textarea",
+        required: true,
+        rows: 3,
+        label: { ar: "وصف الفكرة", fr: "Description", en: "Your idea" },
+        placeholder: { ar: "مثال: متجر ملابس رياضية بالدفع عند الاستلام", fr: "Décrivez votre idée", en: "Describe what you want" },
+      },
+      {
+        key: "style",
+        type: "text",
+        label: { ar: "الأسلوب والمزاج (اختياري)", fr: "Style (optionnel)", en: "Style & mood (optional)" },
+        placeholder: { ar: "مثال: جريء، نظيف، فاخر", fr: "Ex : minimal, sombre, luxe", en: "E.g. minimal, dark, luxury" },
+      },
+      {
+        key: "colors",
+        type: "text",
+        label: { ar: "الألوان (اختياري)", fr: "Couleurs (optionnel)", en: "Colors (optional)" },
+        placeholder: { ar: "مثال: أخضر زمردي وذهبي", fr: "Ex : vert émeraude et or", en: "E.g. emerald and gold" },
+      },
+    ],
+  },
+  {
+    id: "logo-designer",
+    icon: PenTool,
+    accent: "rose",
+    pro: true,
+    kind: "game",
+    name: { ar: "مصمم الشعارات", fr: "Designer de logos", en: "Logo designer" },
+    desc: { ar: "شعار احترافي مع لوحة ألوان وعرض كامل", fr: "Logo pro avec palette et présentation", en: "Pro logo with palette and presentation" },
+    fields: [
+      {
+        key: "idea",
+        type: "textarea",
+        required: true,
+        rows: 3,
+        label: { ar: "وصف الفكرة", fr: "Description", en: "Your idea" },
+        placeholder: { ar: "مثال: مقهى عصري اسمه «دزاير بيت»", fr: "Décrivez votre idée", en: "Describe what you want" },
+      },
+      {
+        key: "style",
+        type: "text",
+        label: { ar: "الأسلوب والمزاج (اختياري)", fr: "Style (optionnel)", en: "Style & mood (optional)" },
+        placeholder: { ar: "مثال: بسيط، هندسي، عربي معاصر", fr: "Ex : minimal, sombre, luxe", en: "E.g. minimal, dark, luxury" },
+      },
+      {
+        key: "colors",
+        type: "text",
+        label: { ar: "الألوان (اختياري)", fr: "Couleurs (optionnel)", en: "Colors (optional)" },
+        placeholder: { ar: "مثال: أخضر زمردي وذهبي", fr: "Ex : vert émeraude et or", en: "E.g. emerald and gold" },
       },
     ],
   },

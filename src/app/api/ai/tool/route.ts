@@ -109,11 +109,13 @@ export async function POST(req: Request) {
     };
     // the game builder uses the whole AI team (Gemini + Grok + OpenRouter + Groq)
     const stream =
-      isPro && tool.id === "game-builder"
+      isPro && (tool.id === "game-builder" || tool.kind === "game")
         ? ensembleStream({
             system: prompt.system,
             messages: [{ role: "user", text: prompt.user }],
             temperature: 0.7,
+            epic: true,
+            maxTokens: 64000,
             onModel: (m) => {
               usedModel = m;
             },
@@ -128,7 +130,7 @@ export async function POST(req: Request) {
             temperature: tool.pro ? 0.5 : 0.8,
             tier: isPro ? "pro" : "free",
             mode: isPro && QUALITY_TOOLS.has(tool.id) ? "quality" : "speed",
-            maxTokens: tool.id === "game-builder" ? 12000 : undefined,
+            maxTokens: (tool.id === "game-builder" || tool.kind === "game") ? 64000 : tool.pro ? 24000 : undefined,
             onModel: (m) => {
               usedModel = m;
             },

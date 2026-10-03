@@ -2,7 +2,7 @@
 
 import { useI18n, type Locale } from "@/lib/i18n";
 
-/** Strings for the v5 Pro features. Kept apart from i18n.tsx so the core dictionary stays untouched. */
+/** Strings for the v6 Pro features. Kept apart from i18n.tsx so the core dictionary stays untouched. */
 const P = {
   ar: {
     proOnly: "هذي الميزة في برق Pro فقط",
@@ -44,7 +44,7 @@ const P = {
     codeCopied: "تم النسخ",
     codePreview: "معاينة",
     codeDownload: "تحميل",
-    proFeaturesTitle: "ميزات Pro في v5",
+    proFeaturesTitle: "ميزات Pro في v6",
     proFeatures: [
       "أحدث نماذج Gemini + سرعة فائقة (طلبات متوازية)",
       "تحليل الكود: مراجعة، إصلاح، شرح، تحويل، أمان، اختبارات",
@@ -93,7 +93,7 @@ const P = {
     codeCopied: "Copié",
     codePreview: "Aperçu",
     codeDownload: "Télécharger",
-    proFeaturesTitle: "Fonctions Pro v5",
+    proFeaturesTitle: "Fonctions Pro v6",
     proFeatures: [
       "Derniers modèles Gemini + vitesse ultra (requêtes parallèles)",
       "Analyse de code : revue, correction, explication, conversion, sécurité, tests",
@@ -142,7 +142,7 @@ const P = {
     codeCopied: "Copied",
     codePreview: "Preview",
     codeDownload: "Download",
-    proFeaturesTitle: "v5 Pro features",
+    proFeaturesTitle: "v6 Pro features",
     proFeatures: [
       "Newest Gemini models + ultra speed (parallel requests)",
       "Code analysis: review, fix, explain, convert, security, tests",

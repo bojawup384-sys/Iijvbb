@@ -9,7 +9,7 @@ import {
   type FormEvent,
 } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   ArrowDown,
@@ -36,6 +36,7 @@ import {
   X,
   Info,
   Zap,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -126,6 +127,25 @@ async function copyText(text: string): Promise<boolean> {
 /* One message — memoised so only the streaming bubble re-renders      */
 /* ------------------------------------------------------------------ */
 
+function ThinkingOrb({ label }: { label: string }) {
+  const steps = ["يحلل سؤالك", "يجمع الأفكار", "يكتب الإجابة"];
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setI((v) => (v + 1) % steps.length), 1600);
+    return () => clearInterval(id);
+  }, [steps.length]);
+  return (
+    <span className="flex items-center gap-3 py-1.5 text-sm text-slate-300">
+      <span className="relative grid h-7 w-7 place-items-center">
+        <span className="absolute inset-0 animate-ping rounded-full bg-brand-400/30" />
+        <span className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-amber-300 border-e-brand-300" style={{ animationDuration: "1.1s" }} />
+        <Sparkles className="h-3.5 w-3.5 text-brand-300" />
+      </span>
+      <span className="font-semibold">{label} <span className="text-slate-500">· {steps[i]}…</span></span>
+    </span>
+  );
+}
+
 const MessageRow = memo(function MessageRow({
   m,
   name,
@@ -190,18 +210,7 @@ const MessageRow = memo(function MessageRow({
               )}
             </>
           ) : m.pending && !m.content ? (
-            <span className="flex items-center gap-2 py-1 text-sm text-slate-400">
-              {thinking}
-              <span className="flex gap-1">
-                {[0, 1, 2].map((d) => (
-                  <span
-                    key={d}
-                    className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-300"
-                    style={{ animationDelay: `${d * 0.2}s` }}
-                  />
-                ))}
-              </span>
-            </span>
+            <ThinkingOrb label={thinking} />
           ) : (
             <Markdown pro={pro} plainCode={!!m.pending}>
               {m.content}
@@ -259,6 +268,22 @@ export function ChatPage() {
   const [showJump, setShowJump] = useState(false);
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [deep, setDeep] = useState(false);
+  const router = useRouter();
+  const [tier, setTier] = useState<"v4" | "v5" | "v6">("v6");
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("barq_tier");
+      if (v === "v4" || v === "v5" || v === "v6") setTier(v);
+    } catch {}
+  }, []);
+  const pickTier = (v: "v4" | "v5" | "v6") => {
+    if (v !== "v4" && !isPro) {
+      router.push("/app/upgrade");
+      return;
+    }
+    setTier(v);
+    try { localStorage.setItem("barq_tier", v); } catch {}
+  };
   const [listening, setListening] = useState(false);
   const [voiceOk, setVoiceOk] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -463,7 +488,8 @@ export function ChatPage() {
                     .map((f) => ({ name: f.name, text: f.text })),
                 }
               : {}),
-            ...(isPro && deep ? { deep: true } : {}),
+            ...(isPro && (deep || tier === "v6") ? { deep: true } : {}),
+            ...(isPro && tier === "v6" ? { v6: true } : {}),
           }),
           signal: controller.signal,
         });
@@ -537,7 +563,7 @@ export function ChatPage() {
         }
       }
     },
-    [msgs, streaming, convId, authFetch, applyHeaders, loadConvs, files, isPro, deep, pro.defaultAsk]
+    [msgs, streaming, convId, authFetch, applyHeaders, loadConvs, files, isPro, deep, tier, pro.defaultAsk]
   );
 
   /* ---------- Pro: attachments, voice, export ---------- */
@@ -1063,6 +1089,31 @@ export function ChatPage() {
               )}
             </div>
           </form>
+          <div className="mx-auto mb-1.5 mt-1 flex max-w-3xl items-center gap-1 px-1.5" role="radiogroup" aria-label="النموذج">
+            {([["v4", "برق 4", false], ["v5", "برق 5 Pro", true], ["v6", "برق 6 Pro", true]] as const).map(([id, label, pr]) => {
+              const on = (isPro ? tier : "v4") === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => pickTier(id)}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[11px] font-black transition",
+                    on
+                      ? id === "v6"
+                        ? "border-amber-300/70 bg-gradient-to-l from-amber-300/25 to-brand-400/25 text-amber-100 shadow-[0_0_18px_-4px_rgba(227,176,75,.6)]"
+                        : "border-brand-400/60 bg-brand-500/20 text-white"
+                      : "border-white/10 bg-white/[0.03] text-slate-400 hover:border-white/25"
+                  )}
+                >
+                  {id === "v6" ? <Sparkles className="h-3 w-3" /> : pr && !isPro ? <Lock className="h-3 w-3" /> : null}
+                  {label}
+                </button>
+              );
+            })}
+          </div>
           {isPro && (
             <div className="mx-auto mt-1 flex max-w-3xl items-center gap-1.5 px-1.5">
               <button

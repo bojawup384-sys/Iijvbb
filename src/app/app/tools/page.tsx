@@ -27,7 +27,7 @@ export default function ToolsPage() {
         <p className="mt-2 text-slate-400">{t.app.toolsSub}</p>
       </motion.div>
 
-      {/* v5 Pro: code analysis + game builder */}
+      {/* v6 Pro: code analysis + game builder */}
       <section className="mb-12">
         <div className="mb-5 flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-b from-[#f0cf86] to-[#d9a94f] text-ink-950">

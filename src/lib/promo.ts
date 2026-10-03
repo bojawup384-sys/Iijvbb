@@ -1,5 +1,5 @@
 /**
- * The ONLY codes that can activate "برق v5 Pro".
+ * The ONLY codes that can activate "برق v6 Pro".
  * Every code works exactly ONCE (by one account), then it is permanently dead.
  */
 export const PRO_CODES: readonly string[] = [

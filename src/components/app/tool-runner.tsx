@@ -381,7 +381,7 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
                   <div>
                     <p className="text-sm font-black text-white">{pro.gameBuilding}</p>
                     <p dir="ltr" className="text-xs tabular-nums text-slate-400">
-                      {result.length.toLocaleString()} chars
+                      {result.split("\n").length.toLocaleString()} سطر · {result.length.toLocaleString()} chars
                     </p>
                   </div>
                 </div>
