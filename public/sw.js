@@ -1,5 +1,5 @@
 /* برق — service worker (offline shell + fast repeat visits) */
-const CACHE = "barq-v6";
+const CACHE = "barq-v8";
 const OFFLINE_URL = "/offline.html";
 const PRECACHE = [OFFLINE_URL, "/manifest.webmanifest"];
 const MAX_ENTRIES = 80;

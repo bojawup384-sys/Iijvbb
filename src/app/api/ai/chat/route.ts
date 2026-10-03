@@ -13,6 +13,7 @@ import {
   type ChatTurn,
 } from "@/lib/gemini";
 import { CHAT_SYSTEM, CHAT_SYSTEM_PRO, CHAT_SYSTEM_V6, BUILD_SYSTEM_PRO, QUALITY_CONTRACT } from "@/lib/prompts";
+import { personaBlock } from "@/lib/personas";
 import { db } from "@/db";
 import { aiMemories, conversations, messages } from "@/db/schema";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -169,6 +170,8 @@ export async function POST(req: Request) {
     textFiles?: unknown;
     deep?: boolean;
     v6?: boolean;
+    /** persona id (whitelisted server-side) */
+    persona?: string;
     /** Pro: the answer stopped inside a code block — finish it (no credit used) */
     continueFrom?: string;
   };
@@ -373,8 +376,8 @@ export async function POST(req: Request) {
         })
       : await (async () => {
           const system = isPro
-            ? (body.v6 === true ? CHAT_SYSTEM_V6 : CHAT_SYSTEM_PRO) + QUALITY_CONTRACT + memBlock
-            : CHAT_SYSTEM;
+            ? (body.v6 === true ? CHAT_SYSTEM_V6 : CHAT_SYSTEM_PRO) + QUALITY_CONTRACT + memBlock + personaBlock(body.persona)
+            : CHAT_SYSTEM + personaBlock(body.persona);
           const base = await streamGemini({
             system,
             messages: capped,

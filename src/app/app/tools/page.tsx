@@ -1,7 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Crown, Lock } from "lucide-react";
+import Link from "next/link";
+import { Crown, Lock, Wand2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 import { usePro } from "@/lib/pro-i18n";
 import { PRO_TOOLS, TOOLS } from "@/lib/tools";
@@ -27,10 +28,26 @@ export default function ToolsPage() {
         <p className="mt-2 text-slate-400">{t.app.toolsSub}</p>
       </motion.div>
 
+      <Link
+        href="/app/images"
+        className="bento-card mb-8 flex items-center gap-4 !p-4"
+        data-tone="gold"
+      >
+        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-brand-500 via-fuchsia-500 to-gold-400 text-white">
+          <Wand2 className="h-6 w-6" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-black text-white">مولّد الصور</span>
+          <span className="block text-xs leading-relaxed text-slate-400">
+            اكتب وصفًا أو ارفع صورة وعدّلها. شعارات، إعلانات، رسومات.
+          </span>
+        </span>
+      </Link>
+
       {/* v6 Pro: code analysis + game builder */}
       <section className="mb-12">
         <div className="mb-5 flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-b from-white to-zinc-300 text-ink-950">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-b from-gold-200 to-gold-500 text-[#2a1700]">
             <Crown className="h-5 w-5" />
           </span>
           <div>

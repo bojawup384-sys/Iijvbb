@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
+import type { CSSProperties } from "react";
 import {
   Bookmark,
   Check,
   Code2,
+  Loader2,
   Copy,
   Download,
   ExternalLink,
@@ -32,6 +35,53 @@ function withCsp(html: string): string {
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head([^>]*)>/i, `<head$1>${CSP}`);
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html([^>]*)>/i, `<html$1><head>${CSP}</head>`);
   return `<!DOCTYPE html><html><head>${CSP}<meta charset="utf-8"></head><body>${html}</body></html>`;
+}
+
+const noopSub = () => () => {};
+/** true only in the browser, hydration-safe (needed to portal to <body>) */
+function useIsClient() {
+  return useSyncExternalStore(noopSub, () => true, () => false);
+}
+
+/**
+ * The sandboxed iframe, with a loading veil so there is never a white/black
+ * flash or a half-drawn frame, and NO width transition (that transition was
+ * what made the preview jitter while switching phone / tablet / desktop).
+ */
+function Frame({
+  title,
+  doc,
+  runKey,
+  style,
+  className,
+}: {
+  title: string;
+  doc: string;
+  runKey: number;
+  style?: CSSProperties;
+  className?: string;
+}) {
+  const [ready, setReady] = useState(false);
+  return (
+    <div className="relative flex min-h-0 min-w-0 max-w-full justify-center" style={{ width: style?.width ?? "100%", height: style?.height === "100%" ? "100%" : undefined }}>
+      {!ready && (
+        <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[inherit] bg-ink-950">
+          <Loader2 className="h-6 w-6 animate-spin text-gold-400" />
+        </div>
+      )}
+      <iframe
+        key={runKey}
+        title={title}
+        srcDoc={doc}
+        sandbox="allow-scripts allow-pointer-lock allow-modals allow-forms"
+        allow="fullscreen"
+        loading="eager"
+        onLoad={() => setReady(true)}
+        className={cn("block max-w-full bg-ink-950", className)}
+        style={{ ...style, width: "100%" }}
+      />
+    </div>
+  );
 }
 
 export function GamePreview({
@@ -102,13 +152,13 @@ export function GamePreview({
   };
 
   const btn =
-    "inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] font-bold text-slate-300 transition hover:border-brand-400/40 hover:text-white";
+    "inline-flex items-center gap-1.5 rounded-lg border border-brand-400/25 bg-brand-500/10 px-2.5 py-1.5 text-[11px] font-bold text-slate-300 transition hover:border-gold-400/50 hover:text-white";
 
   return (
     <div
       ref={boxRef}
       className={cn(
-        "flex flex-col overflow-hidden rounded-2xl border border-brand-500/30 bg-ink-950",
+        "flex flex-col overflow-hidden rounded-2xl border border-brand-400/35 bg-ink-950 shadow-[0_20px_50px_-30px_rgba(139,92,246,0.8)]",
         className
       )}
     >
@@ -121,7 +171,7 @@ export function GamePreview({
               onClick={() => setView(v)}
               className={cn(
                 "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-black transition",
-                view === v ? "bg-white text-ink-950" : "text-slate-400 hover:text-white"
+                view === v ? "bg-gradient-to-r from-brand-500 to-fuchsia-500 text-white" : "text-slate-400 hover:text-white"
               )}
             >
               {v === "code" && <Code2 className="h-3.5 w-3.5" />}
@@ -190,14 +240,12 @@ export function GamePreview({
           <code>{html}</code>
         </pre>
       ) : (
-        <div className="flex flex-1 justify-center bg-[radial-gradient(circle_at_50%_0%,#18181b,#050505)] p-0 sm:p-3">
-          <iframe
-            key={run}
+        <div className="flex flex-1 justify-center bg-[radial-gradient(circle_at_50%_0%,#1b1850,#060518)] p-0 sm:p-3">
+          <Frame
+            runKey={run}
             title={p.gameTitle}
-            srcDoc={doc}
-            sandbox="allow-scripts allow-pointer-lock allow-modals allow-forms"
-            allow="fullscreen"
-            className={cn("block bg-black transition-all duration-300", device !== "desktop" && "rounded-[1.6rem] ring-4 ring-white/10")}
+            doc={doc}
+            className={cn(device !== "desktop" && "rounded-[1.6rem] ring-4 ring-brand-400/30")}
             style={{ height, minHeight: 280, width: widths[device] ? `min(100%, ${widths[device]}px)` : "100%" }}
           />
         </div>
@@ -221,6 +269,7 @@ export function FullPreview({ html, onClose }: { html: string; onClose: () => vo
   const boxRef = useRef<HTMLDivElement>(null);
   const title = useMemo(() => (html.match(/<title>([^<]{1,60})<\/title>/i)?.[1] ?? "معاينة برق").trim(), [html]);
   const widths = { phone: 390, tablet: 768, desktop: 0 } as const;
+  const isClient = useIsClient();
 
   // lock the page behind the overlay + Escape closes it
   useEffect(() => {
@@ -243,13 +292,15 @@ export function FullPreview({ html, onClose }: { html: string; onClose: () => vo
   const ib =
     "grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-white/10 bg-white/[0.06] text-slate-200 transition active:scale-90 hover:border-brand-400/50 hover:text-white";
 
-  return (
+  if (!isClient) return null;
+
+  return createPortal(
     <div
       ref={boxRef}
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      className="fixed inset-0 z-[200] flex flex-col bg-ink-950"
+      className="fixed inset-0 z-[200] flex w-screen max-w-full flex-col overflow-hidden bg-ink-950"
       style={{ height: "100dvh" }}
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-white/10 bg-ink-900/95 px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur">
@@ -260,7 +311,7 @@ export function FullPreview({ html, onClose }: { html: string; onClose: () => vo
           <p className="truncate text-sm font-black text-white">{title}</p>
           <p className="truncate text-[10.5px] font-bold text-brand-300">معاينة حيّة · شاشة كاملة</p>
         </div>
-        <div className="flex items-center gap-1.5 overflow-x-auto">
+        <div className="no-scrollbar flex min-w-0 shrink items-center gap-1.5 overflow-x-auto">
           <button type="button" aria-label="إعادة تشغيل" onClick={() => setRun((n) => n + 1)} className={ib}>
             <RotateCcw className="h-[18px] w-[18px]" />
           </button>
@@ -348,18 +399,17 @@ export function FullPreview({ html, onClose }: { html: string; onClose: () => vo
           <code>{html}</code>
         </pre>
       ) : (
-        <div className="flex min-h-0 flex-1 justify-center bg-[radial-gradient(circle_at_50%_0%,#18181b,#050505)] sm:p-3">
-          <iframe
-            key={run}
+        <div className="flex min-h-0 flex-1 justify-center bg-[radial-gradient(circle_at_50%_0%,#1b1850,#060518)] sm:p-3">
+          <Frame
+            runKey={run}
             title={title}
-            srcDoc={doc}
-            sandbox="allow-scripts allow-pointer-lock allow-modals allow-forms"
-            allow="fullscreen"
-            className={cn("block h-full bg-black transition-all duration-300", device !== "desktop" && "rounded-[1.6rem] ring-4 ring-white/10")}
-            style={{ width: widths[device] ? `min(100%, ${widths[device]}px)` : "100%" }}
+            doc={doc}
+            className={cn("h-full", device !== "desktop" && "rounded-[1.6rem] ring-4 ring-brand-400/30")}
+            style={{ height: "100%", width: widths[device] ? `min(100%, ${widths[device]}px)` : "100%" }}
           />
         </div>
       )}
-    </div>
+    </div>,
+    document.body
   );
 }

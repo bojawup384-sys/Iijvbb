@@ -7,6 +7,7 @@ import {
   Marquee,
   ToolsShowcase,
 } from "@/components/landing/sections";
+import { V9Features } from "@/components/landing/v9";
 import { Pricing } from "@/components/landing/pricing";
 import { CtaBand, Faq, Footer } from "@/components/landing/faq-footer";
 
@@ -18,6 +19,7 @@ export default function LandingPage() {
         <Hero />
         <Marquee />
         <Features />
+        <V9Features />
         <ToolsShowcase />
         <Pricing />
         <Faq />

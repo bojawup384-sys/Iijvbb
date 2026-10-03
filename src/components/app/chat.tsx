@@ -41,6 +41,11 @@ import {
   Info,
   Zap,
   Sparkles,
+  Volume2,
+  VolumeX,
+  ThumbsUp,
+  ThumbsDown,
+  CornerDownLeft,
   type LucideIcon,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -50,6 +55,8 @@ import { useCredits, UserAvatar } from "@/components/app/app-shell";
 import { Markdown } from "@/components/markdown";
 import { Logo } from "@/components/logo";
 import { cn } from "@/lib/utils";
+import { PERSONAS, SLASH_COMMANDS, FOLLOW_UPS, matchSlash, isPersonaId, type PersonaId } from "@/lib/personas";
+import { BARQ_EVENTS } from "@/components/app/command-palette";
 import { FullPreview } from "@/components/game-preview";
 import {
   codeLooksCut,
@@ -170,6 +177,7 @@ const MessageRow = memo(function MessageRow({
   isLast,
   onPreview,
   onRegenerate,
+  onQuick,
 }: {
   m: Msg;
   name: string | null;
@@ -181,8 +189,29 @@ const MessageRow = memo(function MessageRow({
   isLast: boolean;
   onPreview: (html: string) => void;
   onRegenerate: () => void;
+  onQuick: (text: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [vote, setVote] = useState<0 | 1 | -1>(0);
+  useEffect(() => () => { try { window.speechSynthesis?.cancel(); } catch {} }, []);
+  const toggleSpeak = () => {
+    try {
+      const synth = window.speechSynthesis;
+      if (!synth) return;
+      if (speaking) { synth.cancel(); setSpeaking(false); return; }
+      synth.cancel();
+      const plain = m.content.replace(/```[\s\S]*?```/g, " ").replace(/[#*_>`|~-]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 4000);
+      const u = new SpeechSynthesisUtterance(plain);
+      u.lang = /[\u0600-\u06FF]/.test(plain) ? "ar-SA" : /\b(le|la|les|des|est|une|pour)\b/i.test(plain) ? "fr-FR" : "en-US";
+      u.rate = 1;
+      u.onend = () => setSpeaking(false);
+      u.onerror = () => setSpeaking(false);
+      setSpeaking(true);
+      synth.speak(u);
+    } catch { setSpeaking(false); }
+  };
+  const words = useMemo(() => (done ? m.content.trim().split(/\s+/).length : 0), [done, m.content]);
   const isUser = m.role === "user";
   const done = !isUser && !m.pending && !!m.content;
   const html = useMemo(() => (done && pro ? extractHtml(m.content) : null), [done, pro, m.content]);
@@ -205,7 +234,7 @@ const MessageRow = memo(function MessageRow({
         className="flex w-full justify-end gap-2.5"
       >
         <div className="max-w-[86%] min-w-0 sm:max-w-[78%]">
-          <div className="rounded-3xl rounded-se-lg bg-zinc-900 px-4.5 py-3 text-[16px] leading-[1.75] text-white ring-1 ring-zinc-700">
+          <div className="rounded-3xl rounded-se-lg bg-gradient-to-br from-brand-600 to-fuchsia-600 px-4.5 py-3 text-[16px] leading-[1.75] text-white shadow-[0_10px_30px_-14px_rgba(168,85,247,0.9)] ring-1 ring-white/20">
             <p className="whitespace-pre-wrap break-words">{m.content}</p>
             {m.files && m.files.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -234,7 +263,7 @@ const MessageRow = memo(function MessageRow({
       transition={{ duration: 0.2 }}
       className="flex w-full gap-3"
     >
-      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white text-base font-bold leading-none text-ink-950 ring-1 ring-white/15">
+      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-brand-500 via-fuchsia-500 to-gold-400 text-base font-bold leading-none text-white ring-1 ring-white/20">
         ب
       </span>
 
@@ -264,7 +293,7 @@ const MessageRow = memo(function MessageRow({
                 {zipFiles.length} ملفات · {zipSizeLabel(zipFiles)} · اضغط للتحميل
               </span>
             </span>
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-ink-950">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-500 to-gold-400 text-white">
               <Download className="h-4.5 w-4.5" />
             </span>
           </button>
@@ -297,6 +326,31 @@ const MessageRow = memo(function MessageRow({
                 إعادة
               </button>
             )}
+            <button type="button" onClick={toggleSpeak} className={cn(act, speaking && "text-aqua-300")} aria-pressed={speaking}>
+              {speaking ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+              {speaking ? "إيقاف" : "اسمع"}
+            </button>
+            <button type="button" onClick={() => setVote(vote === 1 ? 0 : 1)} aria-label="جواب مفيد" aria-pressed={vote === 1} className={cn(act, "px-2", vote === 1 && "text-emerald-300")}>
+              <ThumbsUp className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={() => setVote(vote === -1 ? 0 : -1)} aria-label="جواب ضعيف" aria-pressed={vote === -1} className={cn(act, "px-2", vote === -1 && "text-rose-300")}>
+              <ThumbsDown className="h-4 w-4" />
+            </button>
+            {words > 40 && <span className="ms-auto px-2 text-[11px] font-semibold text-slate-600">{words} كلمة</span>}
+          </div>
+        )}
+        {done && isLast && (
+          <div className="no-scrollbar -mx-1 mt-1.5 flex gap-1.5 overflow-x-auto px-1 pb-1">
+            {FOLLOW_UPS.map((f) => (
+              <button
+                key={f.label}
+                type="button"
+                onClick={() => onQuick(f.prompt)}
+                className="shrink-0 rounded-full border border-brand-400/25 bg-brand-500/10 px-3.5 py-1.5 text-[12px] font-bold text-brand-200 transition active:scale-95 hover:border-brand-300/60 hover:bg-brand-500/20"
+              >
+                {f.label}
+              </button>
+            ))}
           </div>
         )}
       </div>
@@ -328,7 +382,19 @@ export function ChatPage() {
   const [showJump, setShowJump] = useState(false);
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [deep, setDeep] = useState(false);
+  const [persona, setPersona] = useState<PersonaId>("default");
+  const [slashIdx, setSlashIdx] = useState(0);
   const router = useRouter();
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem("barq_persona");
+      if (isPersonaId(v)) setPersona(v);
+    } catch {}
+  }, []);
+  const pickPersona = useCallback((id: PersonaId) => {
+    setPersona(id);
+    try { localStorage.setItem("barq_persona", id); } catch {}
+  }, []);
   const [tier, setTier] = useState<"v4" | "v5" | "v6">("v6");
   const [preview, setPreview] = useState<string | null>(null);
   useEffect(() => {
@@ -555,6 +621,7 @@ export function ChatPage() {
               : {}),
             ...(isPro && (deep || tier === "v6") ? { deep: true } : {}),
             ...(isPro && tier === "v6" ? { v6: true } : {}),
+            ...(persona !== "default" ? { persona } : {}),
           }),
           signal: controller.signal,
         });
@@ -614,6 +681,7 @@ export function ChatPage() {
                   messages: [...history, { role: "user", content }],
                   continueFrom: acc,
                   v6: tier === "v6",
+                  ...(persona !== "default" ? { persona } : {}),
                 }),
                 signal: controller.signal,
               });
@@ -669,7 +737,7 @@ export function ChatPage() {
         }
       }
     },
-    [msgs, streaming, convId, authFetch, applyHeaders, loadConvs, files, isPro, deep, tier, pro.defaultAsk]
+    [msgs, streaming, convId, authFetch, applyHeaders, loadConvs, files, isPro, deep, tier, persona, pro.defaultAsk]
   );
 
   const regenerate = useCallback(() => {
@@ -688,6 +756,51 @@ export function ChatPage() {
   const regenRef = useRef(regenerate);
   regenRef.current = regenerate;
   const onRegen = useCallback(() => regenRef.current(), []);
+
+  /* ---------- v9: command palette / slash events ---------- */
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const resetRef = useRef(resetChat);
+  resetRef.current = resetChat;
+  const onQuick = useCallback((text: string) => void sendRef.current(text), []);
+  useEffect(() => {
+    const onNew = () => resetRef.current();
+    const onPersona = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (isPersonaId(id)) pickPersona(id);
+    };
+    const onPrompt = (e: Event) => {
+      const d = (e as CustomEvent<{ text: string; send?: boolean }>).detail;
+      if (!d?.text) return;
+      if (d.send) void sendRef.current(d.text);
+      else {
+        setInput(d.text);
+        setTimeout(() => taRef.current?.focus(), 30);
+      }
+    };
+    window.addEventListener(BARQ_EVENTS.newChat, onNew);
+    window.addEventListener(BARQ_EVENTS.persona, onPersona);
+    window.addEventListener(BARQ_EVENTS.prompt, onPrompt);
+    return () => {
+      window.removeEventListener(BARQ_EVENTS.newChat, onNew);
+      window.removeEventListener(BARQ_EVENTS.persona, onPersona);
+      window.removeEventListener(BARQ_EVENTS.prompt, onPrompt);
+    };
+  }, [pickPersona]);
+
+  const slash = matchSlash(input);
+  const applySlash = (c: (typeof SLASH_COMMANDS)[number]) => {
+    setInput(c.template);
+    setSlashIdx(0);
+    setTimeout(() => {
+      const el = taRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(c.template.length, c.template.length);
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 190)}px`;
+    }, 20);
+  };
 
   /* ---------- Pro: attachments, voice, export ---------- */
 
@@ -970,7 +1083,31 @@ export function ChatPage() {
                 <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-400 sm:text-base">
                   {t.app.welcomeSub}
                 </p>
-                <div className="mt-8 grid w-full max-w-2xl gap-2.5 sm:grid-cols-2">
+                <div className="no-scrollbar mt-6 flex w-full max-w-2xl justify-start gap-2 overflow-x-auto px-1 pb-1 sm:justify-center sm:flex-wrap" role="radiogroup" aria-label="وضع المساعد">
+                  {PERSONAS.map((p) => {
+                    const on = persona === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        title={p.hint}
+                        onClick={() => pickPersona(p.id)}
+                        className={cn(
+                          "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-2 text-[13px] font-bold transition active:scale-95",
+                          on
+                            ? "border-brand-300/70 bg-gradient-to-br from-brand-500/35 to-fuchsia-500/25 text-white shadow-[0_8px_24px_-12px_rgba(168,85,247,0.9)]"
+                            : "border-white/10 bg-white/[0.04] text-slate-300 hover:border-brand-400/40 hover:text-white"
+                        )}
+                      >
+                        <span aria-hidden>{p.emoji}</span>
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-5 grid w-full max-w-2xl gap-2.5 sm:grid-cols-2">
                   {t.app.suggestions.map((s, i) => {
                     const Icon = SUGGESTION_ICONS[i % SUGGESTION_ICONS.length];
                     return (
@@ -1014,6 +1151,7 @@ export function ChatPage() {
                     isLast={i === msgs.length - 1}
                     onPreview={setPreview}
                     onRegenerate={onRegen}
+                    onQuick={onQuick}
                     name={user?.displayName ?? null}
                     photo={user?.photoURL ?? null}
                     thinking={t.app.thinking}
@@ -1125,7 +1263,32 @@ export function ChatPage() {
               }}
             />
 
-            <div className="rounded-[1.75rem] border border-white/12 bg-ink-900/95 shadow-[0_20px_60px_-26px_rgba(0,0,0,0.95)] backdrop-blur transition focus-within:border-white/40 focus-within:shadow-[0_0_0_4px_rgba(255,255,255,0.06),0_20px_60px_-26px_rgba(0,0,0,0.95)]">
+            {slash && (
+              <div className="glass-deep scroll-y mb-2 max-h-56 rounded-2xl p-1.5" role="listbox" aria-label="أوامر سريعة">
+                {slash.map((c, i) => (
+                  <button
+                    key={c.cmd}
+                    type="button"
+                    role="option"
+                    aria-selected={i === slashIdx}
+                    onMouseMove={() => setSlashIdx(i)}
+                    onClick={() => applySlash(c)}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-xl px-3 py-2 text-start transition",
+                      i === slashIdx ? "bg-brand-500/25 ring-1 ring-brand-400/40" : "hover:bg-white/5"
+                    )}
+                  >
+                    <span dir="ltr" className="grid h-8 min-w-8 place-items-center rounded-lg bg-white/8 px-1.5 text-[12px] font-black text-gold-300">/{c.cmd}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-bold text-white">{c.label}</span>
+                      <span className="block truncate text-[11px] text-slate-400">{c.hint}</span>
+                    </span>
+                    {i === slashIdx && <CornerDownLeft className="h-4 w-4 shrink-0 text-brand-300" />}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="composer-shell rounded-[1.75rem] border border-white/12 bg-ink-900/95 shadow-[0_20px_60px_-26px_rgba(0,0,0,0.95)] backdrop-blur transition focus-within:border-white/40 focus-within:shadow-[0_0_0_4px_rgba(255,255,255,0.06),0_20px_60px_-26px_rgba(0,0,0,0.95)]">
               {files.length > 0 && (
                 <div className="flex flex-wrap gap-2 px-3 pt-3">
                   {files.map((f) => (
@@ -1164,6 +1327,12 @@ export function ChatPage() {
                   e.target.style.height = `${Math.min(e.target.scrollHeight, 190)}px`;
                 }}
                 onKeyDown={(e) => {
+                  if (slash && !e.nativeEvent.isComposing) {
+                    if (e.key === "ArrowDown") { e.preventDefault(); setSlashIdx((i) => Math.min(slash.length - 1, i + 1)); return; }
+                    if (e.key === "ArrowUp") { e.preventDefault(); setSlashIdx((i) => Math.max(0, i - 1)); return; }
+                    if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); applySlash(slash[Math.min(slashIdx, slash.length - 1)]); return; }
+                    if (e.key === "Escape") { e.preventDefault(); setInput(""); return; }
+                  }
                   if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
                   // on phones Enter is a new line; the send button sends
                   if (window.matchMedia("(pointer: coarse)").matches) return;
@@ -1230,6 +1399,19 @@ export function ChatPage() {
                   </button>
                 )}
 
+                {persona !== "default" && (
+                  <button
+                    type="button"
+                    onClick={() => pickPersona("default")}
+                    title="اضغط للرجوع إلى الوضع العادي"
+                    className="inline-flex h-8 shrink-0 items-center gap-1 rounded-full border border-brand-300/40 bg-brand-500/15 px-2.5 text-[12px] font-black text-brand-100 transition active:scale-95"
+                  >
+                    <span aria-hidden>{PERSONAS.find((p) => p.id === persona)?.emoji}</span>
+                    {PERSONAS.find((p) => p.id === persona)?.label}
+                    <X className="h-3 w-3 opacity-70" />
+                  </button>
+                )}
+
                 {/* model switch: برق 5 / برق 6 live inside the message box */}
                 <div
                   role="radiogroup"
@@ -1253,8 +1435,8 @@ export function ChatPage() {
                           "inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-full px-2.5 text-[12px] font-black transition active:scale-95",
                           on
                             ? id === "v6"
-                              ? "bg-white text-ink-950"
-                              : "bg-zinc-700 text-white"
+                              ? "bg-gradient-to-r from-brand-500 to-fuchsia-500 text-white"
+                              : "bg-ink-700 text-slate-200"
                             : "text-slate-400 hover:text-slate-100"
                         )}
                       >
@@ -1277,7 +1459,7 @@ export function ChatPage() {
                     onClick={stop}
                     aria-label={t.app.stop}
                     title={t.app.stop}
-                    className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-aqua-300 text-ink-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] transition active:scale-90"
+                    className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-aqua-300 to-aqua-500 text-ink-950 shadow-[0_6px_20px_-6px_rgba(34,211,238,0.8)] transition active:scale-90"
                   >
                     <Square className="h-4 w-4 fill-current" />
                   </button>
@@ -1290,7 +1472,7 @@ export function ChatPage() {
                     className={cn(
                       "grid h-11 w-11 shrink-0 place-items-center rounded-full transition duration-150 active:scale-90",
                       canSend
-                        ? "bg-white text-ink-950 hover:bg-zinc-200"
+                        ? "bg-gradient-to-br from-brand-500 to-fuchsia-500 text-white shadow-[0_8px_24px_-8px_rgba(168,85,247,0.9)] hover:brightness-110"
                         : "bg-white/[0.07] text-slate-500"
                     )}
                   >

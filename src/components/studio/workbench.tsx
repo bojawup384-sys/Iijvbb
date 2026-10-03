@@ -340,7 +340,7 @@ export function Workbench({
       aria-pressed={mode === m}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition",
-        mode === m ? "bg-white text-ink-950" : "text-slate-400 hover:text-white"
+        mode === m ? "bg-gradient-to-r from-brand-500 to-fuchsia-500 text-white" : "text-slate-400 hover:text-white"
       )}
     >
       <Icon className="h-3.5 w-3.5" />
@@ -348,13 +348,13 @@ export function Workbench({
     </button>
   );
   const act =
-    "inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-800 bg-transparent px-2.5 text-xs font-semibold text-slate-300 transition hover:border-zinc-600 hover:text-white disabled:opacity-40";
+    "inline-flex h-8 items-center gap-1.5 rounded-lg border border-brand-400/20 bg-transparent px-2.5 text-xs font-semibold text-slate-300 transition hover:border-brand-300/60 hover:text-white disabled:opacity-40";
 
   return (
     <div dir="ltr" className={cn("glass flex min-h-0 flex-col overflow-hidden rounded-2xl", className)}>
       {/* toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2">
-        <div className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-black/40 p-0.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-brand-400/20 px-3 py-2">
+        <div className="flex items-center gap-1 rounded-lg border border-brand-400/20 bg-black/40 p-0.5">
           {tab("code", "الكود", Code2)}
           {tab("live", "المعاينة الحية", Eye)}
           {tab("visual", "تعديل بصري", PenLine)}
@@ -407,7 +407,7 @@ export function Workbench({
       </div>
 
       {flash && (
-        <p className="flex items-center justify-center gap-1.5 border-b border-zinc-800 bg-white/5 py-1 text-[11px] font-semibold text-white">
+        <p className="flex items-center justify-center gap-1.5 border-b border-brand-400/20 bg-white/5 py-1 text-[11px] font-semibold text-white">
           <Check className="h-3.5 w-3.5" />
           {flash}
         </p>
@@ -415,7 +415,7 @@ export function Workbench({
 
       {/* self-healing banner */}
       {(errors.length > 0 || healing) && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 bg-white/[0.04] px-3 py-2 text-xs text-slate-200">
+        <div className="flex flex-wrap items-center gap-2 border-b border-brand-400/20 bg-white/[0.04] px-3 py-2 text-xs text-slate-200">
           {healing ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4 text-slate-300" />}
           <span className="min-w-0 flex-1 truncate" dir="auto">
             {healing ? "المحرك يشخّص الأخطاء ويصلح الكود..." : errors[errors.length - 1]}
@@ -440,7 +440,7 @@ export function Workbench({
 
       <div className="flex min-h-0 flex-1">
         {/* file explorer */}
-        <aside className="scroll-y hidden w-56 shrink-0 border-e border-zinc-800 bg-black/30 py-2 md:block">
+        <aside className="scroll-y hidden w-56 shrink-0 border-e border-brand-400/20 bg-black/30 py-2 md:block">
           <p className="px-3 pb-1.5 text-[11px] font-semibold text-slate-500">المشروع</p>
           {files.length === 0 ? (
             <p className="px-3 py-2 text-xs leading-relaxed text-slate-600">ستظهر الملفات هنا فور بدء التوليد.</p>
@@ -484,7 +484,7 @@ export function Workbench({
             <div className="scroll-y min-h-0 flex-1 bg-black">
               {activeFile ? (
                 <>
-                  <p className="sticky top-0 z-10 border-b border-zinc-800 bg-black/90 px-3 py-1.5 text-[11px] text-slate-500 backdrop-blur">
+                  <p className="sticky top-0 z-10 border-b border-brand-400/20 bg-black/90 px-3 py-1.5 text-[11px] text-slate-500 backdrop-blur">
                     {activeFile.path}
                   </p>
                   <pre className="code-surface p-0 text-slate-300">
@@ -538,11 +538,11 @@ export function Workbench({
                       <div className="flex items-center gap-2 text-xs text-slate-400">
                         <label className="flex items-center gap-1.5">
                           النص
-                          <input type="color" defaultValue="#ffffff" onChange={(e) => send({ type: "style", prop: "color", value: e.target.value })} className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent" />
+                          <input type="color" defaultValue="#ffffff" onChange={(e) => send({ type: "style", prop: "color", value: e.target.value })} className="h-6 w-8 cursor-pointer rounded border border-brand-400/30 bg-transparent" />
                         </label>
                         <label className="flex items-center gap-1.5">
                           الخلفية
-                          <input type="color" defaultValue="#0a0a0a" onChange={(e) => send({ type: "style", prop: "backgroundColor", value: e.target.value })} className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent" />
+                          <input type="color" defaultValue="#0a0a0a" onChange={(e) => send({ type: "style", prop: "backgroundColor", value: e.target.value })} className="h-6 w-8 cursor-pointer rounded border border-brand-400/30 bg-transparent" />
                         </label>
                         <label className="flex flex-1 items-center gap-1.5">
                           الحجم

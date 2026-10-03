@@ -117,7 +117,7 @@ export default function SettingsPage() {
                 className={cn(
                   "inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-black",
                   isPro
-                    ? "bg-amber-400 text-ink-950"
+                    ? "bg-gradient-to-b from-gold-200 to-gold-500 text-[#2a1700]"
                     : "bg-white/10 text-slate-300"
                 )}
               >

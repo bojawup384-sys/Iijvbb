@@ -60,7 +60,7 @@ export function Pricing() {
                 className={cn(
                   "rounded-xl px-5 py-2 text-sm font-bold transition",
                   yearly === y
-                    ? "bg-white text-ink-950 shadow-lg"
+                    ? "bg-gradient-to-r from-brand-500 to-fuchsia-500 text-white shadow-lg"
                     : "text-slate-400 hover:text-white"
                 )}
               >

@@ -260,7 +260,7 @@ export function ToolRunner({ tool }: { tool: ToolDef }) {
             <h1 className="flex items-center gap-2 text-xl font-black text-white sm:text-2xl">
               {loc(tool.name, locale)}
               {tool.pro && (
-                <span className="rounded-md bg-gradient-to-b from-white to-zinc-300 px-1.5 py-0.5 text-[10px] font-black leading-none text-ink-950">
+                <span className="rounded-md bg-gradient-to-b from-gold-200 to-gold-500 px-1.5 py-0.5 text-[10px] font-black leading-none text-[#2a1700]">
                   PRO
                 </span>
               )}

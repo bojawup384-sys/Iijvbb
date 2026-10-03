@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Code2, Crown, Gamepad2, LayoutTemplate, Palette, PenTool, Smartphone, Trash2, Wand2 } from "lucide-react";
+import { ChevronLeft, Code2, Crown, Gamepad2, LayoutTemplate, Palette, PenTool, Smartphone, Trash2, Wand2 } from "lucide-react";
 import { useCredits } from "@/components/app/app-shell";
 import { GamePreview } from "@/components/game-preview";
 import { useAuth } from "@/lib/auth-context";
@@ -70,7 +70,7 @@ export default function StudioPage() {
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="flex items-center gap-2.5 text-3xl font-black text-white sm:text-4xl">
-            <Wand2 className="h-8 w-8 text-amber-300" />
+            <Wand2 className="h-8 w-8 text-gold-400" />
             الاستوديو
           </h1>
           <p className="mt-2 max-w-md text-sm leading-relaxed text-slate-400">
@@ -89,6 +89,22 @@ export default function StudioPage() {
         )}
       </header>
 
+      <Link
+        href="/app/arcade"
+        className="gold-border group relative mb-6 flex min-w-0 items-center gap-4 overflow-hidden rounded-3xl p-5 transition active:scale-[0.99]"
+      >
+        <span className="pro-shine grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-gold-200 via-gold-400 to-gold-600 text-[#2a1700]">
+          <Gamepad2 className="h-7 w-7" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="gold-text block text-lg font-black">الأركيد: عاصفة برق</span>
+          <span className="mt-0.5 block text-xs leading-relaxed text-slate-300">
+            لعبة كاملة بمراحل وزعماء وقوى خاصة. العبها الآن وحطّم رقمك القياسي.
+          </span>
+        </span>
+        <ChevronLeft className="h-5 w-5 shrink-0 text-gold-300 transition group-hover:-translate-x-1" />
+      </Link>
+
       <div className="mb-10 grid grid-cols-2 gap-3 sm:grid-cols-5">
         {CREATE.map(({ id, label, Icon }) => (
           <Link
@@ -96,7 +112,7 @@ export default function StudioPage() {
             href={`/app/tools/${id}`}
             className="pro-card group flex flex-col items-center gap-3 rounded-2xl p-5 text-center"
           >
-            <span className="grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br from-brand-500/30 to-amber-300/20 text-amber-200 transition group-hover:scale-110">
+            <span className="grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br from-brand-500/35 to-gold-300/25 text-gold-300 transition group-hover:scale-110">
               <Icon className="h-6 w-6" />
             </span>
             <span className="text-sm font-black text-white">{label}</span>

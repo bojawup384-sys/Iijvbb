@@ -63,7 +63,7 @@ function ChatMock() {
         <div className="flex min-h-[290px] flex-col gap-3 p-5">
           {/* user bubble */}
           <div className="flex justify-end">
-            <div className="max-w-[85%] rounded-2xl rounded-se-md bg-zinc-800 px-4 py-3 text-[13px] font-semibold leading-relaxed text-white shadow-lg">
+            <div className="max-w-[85%] rounded-2xl rounded-se-md bg-gradient-to-br from-brand-600 to-fuchsia-600 px-4 py-3 text-[13px] font-semibold leading-relaxed text-white shadow-lg">
               {userText}
               {!userDone && (
                 <span className="ms-0.5 inline-block h-3.5 w-[2px] animate-blink bg-white/80 align-middle" />
@@ -77,7 +77,7 @@ function ChatMock() {
               animate={{ opacity: 1, y: 0 }}
               className="flex items-start gap-2.5"
             >
-              <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-white text-sm font-bold leading-none text-ink-950">
+              <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-brand-500 to-gold-400 text-sm font-bold leading-none text-white">
                 ب
               </span>
               <div className="max-w-[88%] whitespace-pre-line rounded-2xl rounded-ss-md border border-white/10 bg-white/5 px-4 py-3 text-[13px] leading-relaxed text-slate-200">
@@ -99,6 +99,17 @@ function ChatMock() {
         </div>
       </div>
 
+      <div aria-hidden className="pointer-events-none absolute inset-0 hidden sm:block">
+        <span className="float-chip absolute -top-5 end-6 rounded-full border border-gold-300/30 bg-ink-800/90 px-3 py-1.5 text-[12px] font-black text-gold-200 shadow-lg shadow-black/40 backdrop-blur">
+          Ctrl K
+        </span>
+        <span className="float-chip absolute top-1/2 -start-8 rounded-full border border-aqua-300/30 bg-ink-800/90 px-3 py-1.5 text-[12px] font-black text-aqua-200 shadow-lg shadow-black/40 backdrop-blur">
+          /لخص
+        </span>
+        <span className="float-chip absolute -bottom-4 end-12 rounded-full border border-brand-300/30 bg-ink-800/90 px-3 py-1.5 text-[12px] font-black text-brand-200 shadow-lg shadow-black/40 backdrop-blur">
+          🔊 اسمع الرد
+        </span>
+      </div>
     </motion.div>
   );
 }

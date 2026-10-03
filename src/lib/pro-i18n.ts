@@ -2,7 +2,7 @@
 
 import { useI18n, type Locale } from "@/lib/i18n";
 
-/** Strings for the v6 Pro features. Kept apart from i18n.tsx so the core dictionary stays untouched. */
+/** Strings for the v8 Pro features. Kept apart from i18n.tsx so the core dictionary stays untouched. */
 const P = {
   ar: {
     proOnly: "هذي الميزة في برق Pro فقط",
@@ -44,13 +44,16 @@ const P = {
     codeCopied: "تم النسخ",
     codePreview: "معاينة",
     codeDownload: "تحميل",
-    proFeaturesTitle: "ميزات Pro في v6",
+    proFeaturesTitle: "ميزات Pro في v8",
     proFeatures: [
       "أحدث النماذج + سرعة فائقة (طلبات متوازية)",
       "تحليل الكود: مراجعة، إصلاح، شرح، تحويل، أمان، اختبارات",
       "صانع ألعاب كامل بمعاينة حيّة وتحميل",
       "رفع الصور وملفات PDF والكود في المحادثة",
       "تفكير عميق، إدخال صوتي، تصدير المحادثات",
+      "الأركيد: لعبة «عاصفة برق» كاملة بمراحل وزعماء وقوى خاصة",
+      "معاينة حيّة بلا وميض مع شاشة كاملة وتحميل ZIP",
+      "شارة ذهبية، أولوية في السرعة، وتحديثات قبل الجميع",
     ],
   },
   fr: {
@@ -93,13 +96,16 @@ const P = {
     codeCopied: "Copié",
     codePreview: "Aperçu",
     codeDownload: "Télécharger",
-    proFeaturesTitle: "Fonctions Pro v6",
+    proFeaturesTitle: "Fonctions Pro v8",
     proFeatures: [
       "Derniers modèles + vitesse ultra (requêtes parallèles)",
       "Analyse de code : revue, correction, explication, conversion, sécurité, tests",
       "Créateur de jeux complet avec aperçu en direct et téléchargement",
       "Images, PDF et fichiers de code dans le chat",
       "Réflexion profonde, saisie vocale, export des conversations",
+      "Arcade : le jeu complet « Barq Storm » avec niveaux, boss et bonus",
+      "Aperçu en direct sans scintillement, plein écran et export ZIP",
+      "Badge doré, priorité de vitesse et nouveautés en avant-première",
     ],
   },
   en: {
@@ -142,13 +148,16 @@ const P = {
     codeCopied: "Copied",
     codePreview: "Preview",
     codeDownload: "Download",
-    proFeaturesTitle: "v6 Pro features",
+    proFeaturesTitle: "v8 Pro features",
     proFeatures: [
       "Newest models + ultra speed (parallel requests)",
       "Code analysis: review, fix, explain, convert, security, tests",
       "Full game builder with live preview and download",
       "Upload images, PDFs and code files in chat",
       "Deep thinking, voice input, conversation export",
+      "Arcade: the full \"Barq Storm\" game with levels, bosses and power-ups",
+      "Flicker-free live preview with full screen and ZIP export",
+      "Gold badge, speed priority and early access to updates",
     ],
   },
 };

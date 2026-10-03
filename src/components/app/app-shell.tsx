@@ -24,10 +24,14 @@ import {
   SquarePen,
   Coins,
   Wand2,
+  Gamepad2,
+  Search,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/lib/i18n";
 import { Logo } from "@/components/logo";
+import { CommandPalette } from "@/components/app/command-palette";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { cn } from "@/lib/utils";
 
@@ -69,17 +73,17 @@ export function useCredits() {
 /* Shell                                                               */
 /* ------------------------------------------------------------------ */
 
-/** "v6 PRO" pill shown next to the logo for Pro accounts */
+/** "v8 PRO" pill shown next to the logo for Pro accounts */
 export function ProBadge({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "pro-shine inline-flex items-center gap-1 rounded-md bg-gradient-to-b from-white to-zinc-300 px-1.5 py-0.5 text-[10px] font-black leading-none text-ink-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]",
+        "pro-shine inline-flex shrink-0 items-center gap-1 rounded-md bg-gradient-to-b from-gold-200 via-gold-400 to-gold-600 px-1.5 py-0.5 text-[10px] font-black leading-none text-[#2a1700] shadow-[0_4px_14px_-4px_rgba(251,191,36,0.8),inset_0_1px_0_rgba(255,255,255,0.6)]",
         className
       )}
     >
       <Crown className="h-3 w-3" />
-      v6 PRO
+      v8 PRO
     </span>
   );
 }
@@ -139,14 +143,18 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   if (loading || !user) return <FullLoader label={t.common.loading} />;
 
-  const nav = [
+  const nav: { href: string; label: string; icon: typeof Crown; exact: boolean; desktopOnly?: boolean }[] = [
     { href: "/app", label: t.app.chat, icon: MessagesSquare, exact: true },
     { href: "/app/tools", label: t.app.tools, icon: LayoutGrid, exact: false },
     { href: "/app/studio", label: "الاستوديو", icon: Wand2, exact: true },
+    { href: "/app/images", label: "الصور", icon: ImageIcon, exact: true, desktopOnly: true },
+    { href: "/app/arcade", label: "الأركيد", icon: Gamepad2, exact: true, desktopOnly: true },
     { href: "/app/history", label: t.app.history, icon: History, exact: true },
     { href: "/app/upgrade", label: t.app.upgrade, icon: Crown, exact: true },
     { href: "/app/settings", label: t.app.settings, icon: Settings, exact: true },
   ];
+
+  const mobileNav = nav.filter((n) => !n.desktopOnly);
 
   const isActive = (href: string, exact: boolean) =>
     exact ? pathname === href : pathname.startsWith(href);
@@ -183,6 +191,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             {t.app.newChat}
           </Link>
 
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new Event("barq:palette"))}
+            className="group mb-3 flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 text-sm text-slate-400 transition hover:border-brand-400/40 hover:bg-brand-500/10 hover:text-white"
+          >
+            <Search className="h-4.5 w-4.5 text-brand-300" />
+            <span className="flex-1 text-start">بحث وأوامر</span>
+            <kbd className="rounded-md border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] font-bold text-slate-400">Ctrl K</kbd>
+          </button>
           <nav className="flex flex-col gap-1.5">
             {nav.map((item) => (
               <Link
@@ -191,19 +208,19 @@ export function AppShell({ children }: { children: ReactNode }) {
                 className={cn(
                   "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition",
                   isActive(item.href, item.exact)
-                    ? "bg-white/[0.07] text-white"
-                    : "text-slate-400 hover:bg-white/5 hover:text-white"
+                    ? "bg-gradient-to-l from-brand-500/35 to-brand-500/5 text-white ring-1 ring-brand-400/30"
+                    : "text-slate-400 hover:bg-brand-500/10 hover:text-white"
                 )}
               >
                 <item.icon
                   className={cn(
                     "h-5 w-5",
-                    isActive(item.href, item.exact) && "text-brand-400"
+                    isActive(item.href, item.exact) && "text-gold-400"
                   )}
                 />
                 {item.label}
                 {item.href === "/app/upgrade" && profile?.plan !== "pro" && (
-                  <span className="ms-auto rounded-md bg-amber-400 px-1.5 py-0.5 text-[9px] font-black text-ink-950">
+                  <span className="ms-auto rounded-md bg-gradient-to-b from-gold-200 to-gold-500 px-1.5 py-0.5 text-[9px] font-black text-[#2a1700]">
                     PRO
                   </span>
                 )}
@@ -225,7 +242,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                   className={cn(
                     "rounded-md px-1.5 py-0.5 text-[10px] font-black",
                     profile?.plan === "pro"
-                      ? "bg-amber-400 text-ink-950"
+                      ? "bg-gradient-to-b from-gold-200 to-gold-500 text-[#2a1700]"
                       : "bg-white/10 text-slate-300"
                   )}
                 >
@@ -234,14 +251,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
               <div className="h-1.5 overflow-hidden rounded-full bg-white/8">
                 <div
-                  className="h-full rounded-full bg-brand-500 transition-all duration-500"
+                  className="h-full rounded-full bg-gradient-to-r from-brand-500 via-aqua-400 to-gold-400 transition-all duration-500"
                   style={{ width: `${creditsPct}%` }}
                 />
               </div>
               {profile?.plan !== "pro" && (
                 <Link
                   href="/app/upgrade"
-                  className="mt-3 flex items-center justify-center gap-1.5 rounded-xl bg-amber-400 py-2 text-xs font-black text-ink-950 transition hover:brightness-110"
+                  className="btn-gold mt-3 w-full gap-1.5 !rounded-xl !py-2 text-xs"
                 >
                   <Crown className="h-3.5 w-3.5" />
                   {t.app.upgradeNow}
@@ -280,8 +297,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         </aside>
 
         {/* ---------------- mobile top bar ---------------- */}
-        <header className="z-40 flex shrink-0 items-center justify-between border-b border-white/6 bg-ink-950/90 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:hidden">
-          <div className="flex items-center gap-2">
+        <header className="z-40 flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-brand-400/15 bg-ink-950/90 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:hidden">
+          <div className="flex min-w-0 items-center gap-2">
             {pathname !== "/app" && (
               <button
                 type="button"
@@ -301,9 +318,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               {profile?.plan === "pro" && <ProBadge />}
             </Link>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-black text-slate-200">
-              <Coins className="h-3.5 w-3.5 text-aqua-400" />
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event("barq:palette"))}
+              aria-label="بحث وأوامر"
+              className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition active:scale-90"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+            <span className="flex items-center gap-1.5 rounded-full border border-gold-400/30 bg-gold-400/10 px-3 py-1.5 text-[11px] font-black text-gold-200">
+              <Coins className="h-3.5 w-3.5 text-gold-400" />
               {profile?.plan === "pro" ? "∞" : `${profile?.creditsLeft ?? "…"}/${profile?.dailyLimit ?? ""}`}
             </span>
             <LanguageSwitcher compact />
@@ -311,30 +336,31 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
 
         {/* ---------------- content ---------------- */}
-        <main className="scroll-y min-h-0 flex-1">{children}</main>
+        <main className="scroll-y min-h-0 min-w-0 flex-1">{children}</main>
+        <CommandPalette />
 
         {/* ---------------- mobile bottom nav ---------------- */}
-        <nav className="app-bottom-nav z-40 shrink-0 border-t border-white/10 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] lg:hidden">
+        <nav className="app-bottom-nav z-40 shrink-0 border-t border-brand-400/20 bg-ink-950/95 pb-[env(safe-area-inset-bottom)] lg:hidden">
           <div className="grid grid-cols-6">
-            {nav.map((item) => {
+            {mobileNav.map((item) => {
               const active = isActive(item.href, item.exact);
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "relative flex flex-col items-center gap-0.5 pb-1 pt-1.5 transition-colors",
+                    "relative flex min-w-0 flex-col items-center gap-0.5 px-0.5 pb-1 pt-1.5 transition-colors",
                     active ? "text-white" : "text-slate-500"
                   )}
                 >
                   {active && (
-                    <span className="absolute inset-x-5 top-0 h-0.5 rounded-full bg-brand-500" />
+                    <span className="absolute inset-x-5 top-0 h-0.5 rounded-full bg-gradient-to-r from-gold-300 to-gold-500 shadow-[0_0_10px_rgba(251,191,36,0.9)]" />
                   )}
                   <item.icon
-                    className={cn("h-5 w-5", active && "text-brand-400")}
+                    className={cn("h-5 w-5", active && "text-gold-400")}
                     strokeWidth={active ? 2.2 : 1.8}
                   />
-                  <span className="text-[9.5px] font-medium leading-tight">{item.label}</span>
+                  <span className="max-w-full truncate text-[9.5px] font-medium leading-tight">{item.label}</span>
                 </Link>
               );
             })}
@@ -371,7 +397,7 @@ export function UserAvatar({
   const initial = (name ?? "B").trim().charAt(0).toUpperCase() || "B";
   return (
     <span
-      className="grid shrink-0 place-items-center rounded-full bg-white font-bold text-ink-950"
+      className="grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-brand-400 to-gold-400 font-bold text-ink-950"
       style={{ width: size, height: size, fontSize: size * 0.42 }}
     >
       {initial}
