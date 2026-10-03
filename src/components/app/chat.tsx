@@ -211,7 +211,6 @@ const MessageRow = memo(function MessageRow({
       synth.speak(u);
     } catch { setSpeaking(false); }
   };
-  const words = useMemo(() => (done ? m.content.trim().split(/\s+/).length : 0), [done, m.content]);
   const isUser = m.role === "user";
   const done = !isUser && !m.pending && !!m.content;
   const html = useMemo(() => (done && pro ? extractHtml(m.content) : null), [done, pro, m.content]);
@@ -221,6 +220,7 @@ const MessageRow = memo(function MessageRow({
   );
   const showZip =
     zipFiles.length > 1 && zipFiles.some((f) => typeof f.data === "string" && f.data.length > 400);
+  const words = useMemo(() => (done ? m.content.trim().split(/\s+/).length : 0), [done, m.content]);
 
   const act =
     "inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-[12px] font-bold text-slate-400 transition active:scale-95 hover:bg-white/[0.07] hover:text-slate-100";

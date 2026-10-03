@@ -150,7 +150,7 @@ export default function ImagesPage() {
     a.remove();
   };
 
-  const useAsRef = (r: Result) => {
+  const editWith = (r: Result) => {
     const [head, data] = r.src.split(",");
     const mime = head.slice(5, head.indexOf(";"));
     setRef({ mime, data, preview: r.src });
@@ -408,7 +408,7 @@ export default function ImagesPage() {
             onClick={() => setBig(null)}
           >
             <div className="flex items-center justify-end gap-2 pb-2" onClick={(e) => e.stopPropagation()}>
-              <button type="button" onClick={() => useAsRef(big)} className="btn-ghost px-4 py-2 text-xs">
+              <button type="button" onClick={() => editWith(big)} className="btn-ghost px-4 py-2 text-xs">
                 <Wand2 className="h-4 w-4" /> عدّل هذه الصورة
               </button>
               <button type="button" onClick={() => download(big)} className="btn-primary px-4 py-2 text-xs">
